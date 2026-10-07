@@ -96,8 +96,8 @@ void Device::loadSettings() {
     if (err != ESP_OK) {
         ESP_LOGW("Device", "No settings found in NVS, using defaults");
         //load espy sans as a default font
-        renderSettings.fontPoints = 16;
-        std::string fontName = "Espy Sans";
+        renderSettings.fontPoints = 14;
+        std::string fontName = "Espy Serif";
         renderSettings.fontFamily  = 0;
         for(int i=0;i<renderer->fontHandler.families.size();i++)
         {

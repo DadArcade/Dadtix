@@ -36,7 +36,7 @@ public:
 
     struct DeviceSettings {
         int displayRefresh = 5;
-        int buzzerEnabled = 1;
+        int buzzerEnabled = 0;
         int buzzerIntensity = 5;
         int nightMode = 0;
         int displayBattery = 1;

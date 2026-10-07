@@ -139,8 +139,8 @@ MenuHandler::MenuHandler(Renderer *renderer)
         Device::getInstance().renderSettings.lineSpacing = 0;
         Device::getInstance().renderSettings.marginsVertical = 0;
         Device::getInstance().renderSettings.marginsHorizontal = 1;
-        Device::getInstance().renderSettings.fontPoints = 16;
-        std::string fontName = "Espy Sans";
+        Device::getInstance().renderSettings.fontPoints = 14;
+        std::string fontName = "Espy Serif";
         Device::getInstance().renderSettings.fontFamily  = 0;
         for(int i=0;i<Device::getInstance().renderer->fontHandler.families.size();i++)
         {
