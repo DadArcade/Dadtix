@@ -330,12 +330,11 @@ bool HtmlParser::VisitEnter(const tinyxml2::XMLElement &element, const tinyxml2:
                   this->epub->get_base_path()      // EPUB root path
               );
               ESP_LOGI(TAG, "css path: %s", css_path.c_str());
-              size_t css_size;
-              uint8_t* raw_css = this->epub->get_item_contents(css_path, &css_size);
-              if (raw_css) {
-                  std::string css(reinterpret_cast<char *>(raw_css), css_size); // construct with length
-                  free(raw_css);
-                  merge_css(this->cssCache, parse_css_string(css));
+              if (this->epub) {
+                  const CSSCache *cached = this->epub->get_or_load_css(css_path);
+                  if (cached) {
+                      merge_css(this->cssCache, *cached);
+                  }
               }
               
               //ESP_LOGI(TAG, "css style for h1: %s",cssCache["h1"]["font-size"].c_str());

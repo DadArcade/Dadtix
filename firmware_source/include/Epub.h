@@ -6,6 +6,7 @@
 #include <freertos/task.h>
 
 #include "ZipFile.h"
+#include "miniCSS.h"
 
 class EpubTocEntry
 {
@@ -40,6 +41,8 @@ private:
   std::string m_base_path;
   // open zip archive instance
   ZipFile m_zip;
+  // cache of parsed stylesheets by relative path
+  std::unordered_map<std::string, CSSCache> m_css_cache;
   // find the path for the content.opf file
   bool find_content_opf_file(ZipFile &zip, std::string &content_opf_file);
   bool parse_content_opf(ZipFile &zip, std::string &content_opf_file);
@@ -49,7 +52,7 @@ private:
 public:
   Epub(const std::string &path);
   ~Epub() { close(); }
-  void close() { m_zip.close(); }
+  void close() { m_zip.close(); m_css_cache.clear(); }
   std::string &get_base_path() { return m_base_path; }
   bool load();
 
@@ -58,6 +61,7 @@ public:
   const std::string &get_author();
   const std::string &get_cover_image_item();
   uint8_t *get_item_contents(const std::string &item_href, size_t *size = nullptr);
+  const CSSCache *get_or_load_css(const std::string &css_path);
 
   std::string &get_spine_item(int spine_index);
   int get_spine_item_id(std::string spine_key);

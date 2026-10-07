@@ -515,6 +515,32 @@ uint8_t *Epub::get_item_contents(const std::string &item_href, size_t *size)
   return content;
 }
 
+const CSSCache *Epub::get_or_load_css(const std::string &css_path)
+{
+  std::string norm_path = normalise_path(css_path);
+  auto it = m_css_cache.find(norm_path);
+  if (it != m_css_cache.end())
+  {
+    ESP_LOGI(TAG, "Reusing cached CSS for %s", norm_path.c_str());
+    return &it->second;
+  }
+
+  size_t css_size = 0;
+  uint8_t *raw_css = get_item_contents(norm_path, &css_size);
+  if (!raw_css)
+  {
+    ESP_LOGE(TAG, "Failed to load CSS %s", norm_path.c_str());
+    return nullptr;
+  }
+
+  std::string css(reinterpret_cast<char *>(raw_css), css_size);
+  free(raw_css);
+
+  auto result = m_css_cache.emplace(norm_path, parse_css_string(css));
+  ESP_LOGI(TAG, "Parsed and cached CSS for %s (%zu rules)", norm_path.c_str(), result.first->second.size());
+  return &result.first->second;
+}
+
 int Epub::get_spine_items_count()
 {
   return m_spine.size();
