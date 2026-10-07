@@ -1,4 +1,4 @@
-# Diptyx
-Here, technical documentation for the Diptyx E-reader will be provided, including schematics, diagrams and the firmware source. 
+# Dadtyx
+This is my fork of the awesome Diptyx project to add a few of my won improvements.
 For more information on the Diptyx project, see the [Diptyx website](https://www.diptyx.dev/)
-For pre-ordering a Diptyx E-reader, see our [Crowd Supply page](https://www.crowdsupply.com/diptyx/diptyx-e-reader)
+For pre-ordering a Diptyx E-reader, see their [Crowd Supply page](https://www.crowdsupply.com/diptyx/diptyx-e-reader)
