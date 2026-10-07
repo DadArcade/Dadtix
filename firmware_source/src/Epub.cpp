@@ -440,35 +440,38 @@ bool Epub::parse_nav_file(ZipFile &zip)
   return true;
 }
 
-Epub::Epub(const std::string &path) : m_path(path)
+Epub::Epub(const std::string &path) : m_path(path), m_zip(path.c_str())
 {
 }
 
 // load in the meta data for the epub file
 bool Epub::load()
 {
-  ZipFile zip(m_path.c_str());
+  if (!m_zip.open())
+  {
+    return false;
+  }
   std::string content_opf_file;
-  if (!find_content_opf_file(zip, content_opf_file))
+  if (!find_content_opf_file(m_zip, content_opf_file))
   {
     return false;
   }
   // get the base path for the content
   m_base_path = content_opf_file.substr(0, content_opf_file.find_last_of('/') + 1);
-  if (!parse_content_opf(zip, content_opf_file))
+  if (!parse_content_opf(m_zip, content_opf_file))
   {
     return false;
   }
   if(!m_toc_ncx_item.empty())
   {
-    if (!parse_toc_ncx_file(zip))
+    if (!parse_toc_ncx_file(m_zip))
     {
       return false;
     }
   }
   else if(!m_nav_item.empty())
   {
-    if (!parse_nav_file(zip))
+    if (!parse_nav_file(m_zip))
     {
       return false;
     }
@@ -502,9 +505,8 @@ const std::string &Epub::get_cover_image_item()
 
 uint8_t *Epub::get_item_contents(const std::string &item_href, size_t *size)
 {
-  ZipFile zip(m_path.c_str());
   std::string path = normalise_path(item_href);
-  auto content = zip.read_file_to_memory(path.c_str(), size);
+  auto content = m_zip.read_file_to_memory(path.c_str(), size);
   if (!content)
   {
     ESP_LOGE(TAG, "Failed to read item %s", path.c_str());

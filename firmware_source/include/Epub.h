@@ -5,7 +5,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
-class ZipFile;
+#include "ZipFile.h"
 
 class EpubTocEntry
 {
@@ -38,6 +38,8 @@ private:
   std::vector<EpubTocEntry> m_toc;
   // the base path for items in the EPUB file
   std::string m_base_path;
+  // open zip archive instance
+  ZipFile m_zip;
   // find the path for the content.opf file
   bool find_content_opf_file(ZipFile &zip, std::string &content_opf_file);
   bool parse_content_opf(ZipFile &zip, std::string &content_opf_file);
@@ -46,7 +48,8 @@ private:
 
 public:
   Epub(const std::string &path);
-  ~Epub() {}
+  ~Epub() { close(); }
+  void close() { m_zip.close(); }
   std::string &get_base_path() { return m_base_path; }
   bool load();
 
