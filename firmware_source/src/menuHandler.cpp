@@ -10,6 +10,10 @@
 #include "tinyusb_console.h"
 #include "tinyusb_default_config.h"
 
+#ifndef FIRMWARE_VERSION
+#define FIRMWARE_VERSION "unknown"
+#endif
+
 PageShowcase pageShowcase;
 
 MenuHandler::MenuHandler(Renderer *renderer)
@@ -120,7 +124,7 @@ MenuHandler::MenuHandler(Renderer *renderer)
     //     Device::getInstance().activeBookPath = "firmwareVersion.epub";
     //     Device::getInstance().simpleReader->init("firmwareVersion.epub",Device::getInstance().renderer);
     //     Device::getInstance().saveAppState();
-    Device::getInstance().notificationHandler->drawNotification("Firmware version: 1.0.2");
+    Device::getInstance().notificationHandler->drawNotification("Firmware version: " FIRMWARE_VERSION);
     vTaskDelay(pdMS_TO_TICKS(1000));
     Device::getInstance().menuHandler->drawMenu();
     }

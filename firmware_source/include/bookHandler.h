@@ -15,7 +15,7 @@
 #include "esp_littlefs.h"
 
 
-#define MAX_BOOK_NAME 128
+#define MAX_BOOK_NAME 256
 extern RTC_NOINIT_ATTR char rtc_currently_parsing_book[MAX_BOOK_NAME];
 
 

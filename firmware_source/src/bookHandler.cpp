@@ -438,6 +438,26 @@ void BookHandler::loadBooks()
 }
 
 
+static std::string getBookMetaFilename(const std::string &bookPath) {
+    std::string sanitized = bookPath;
+    std::replace(sanitized.begin(), sanitized.end(), '/', '_');
+
+    // LittleFS CONFIG_LITTLEFS_OBJ_NAME_LEN is 64 (max 63 chars + null terminator).
+    // If "<sanitized>.json" exceeds 63 chars, truncate and append an 8-char FNV-1a hash.
+    if (sanitized.size() + 5 > 63) {
+        uint32_t hash = 2166136261u;
+        for (unsigned char c : bookPath) {
+            hash ^= c;
+            hash *= 16777619u;
+        }
+        char hashBuf[10];
+        snprintf(hashBuf, sizeof(hashBuf), "_%08x", (unsigned int)hash);
+        sanitized = sanitized.substr(0, 63 - 5 - 9) + hashBuf;
+    }
+
+    return sanitized + ".json";
+}
+
 // save this->indexedBooks to NVS
 void BookHandler::saveBook(Book *book)
 {
@@ -454,7 +474,7 @@ void BookHandler::saveBook(Book *book)
         }
     }
 
-    std::string filename = std::string(basePath) + "/" + book->path + ".json";
+    std::string filename = std::string(basePath) + "/" + getBookMetaFilename(book->path);
     std::string jsonStr = book->toJSON();
 
     FILE *f = fopen(filename.c_str(), "w");
@@ -485,7 +505,7 @@ void BookHandler::deleteBook(const std::string &bookPath)
     bool deleteFromSD = Device::getInstance().deviceSettings.storeDataOnSD;
     const char *basePath = deleteFromSD ? "/sdcard/book_data" : "/littlefs/books";
 
-    std::string filename = std::string(basePath) + "/" + bookPath + ".json";
+    std::string filename = std::string(basePath) + "/" + getBookMetaFilename(bookPath);
 
     if (remove(filename.c_str()) != 0) {
         ESP_LOGW(TAG, "Failed to delete book file: %s", filename.c_str());
@@ -626,11 +646,12 @@ void BookHandler::listBooks(void)
     if(authorList.empty()) authorList.emplace_back("Favorite books");
     const char *sdPath = "/sdcard";
 
-    DIR *dir = opendir(sdPath);
-    if (!dir) {
+    DIR *rootDir = opendir(sdPath);
+    if (!rootDir) {
         ESP_LOGE(TAG, "Failed to open directory: %s", sdPath);
         return;
     }
+    closedir(rootDir);
 
     Device &dev = Device::getInstance();
     if (dev.activeBookPath.empty()) dev.activeBookIndex = 0;
@@ -646,15 +667,51 @@ void BookHandler::listBooks(void)
         dev.renderSettings.marginsVertical
     };
 
-    // Step 2: Scan /sdcard and process each EPUB
+    // Step 2: Recursively scan /sdcard (and subfolders) and process each EPUB.
+    // Close each DIR* before opening the next so we never exceed FATFS max_files.
     std::vector<std::string> foundPaths;
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_type == DT_DIR) continue;
-        if (!ends_with_epub(entry->d_name)) continue;
-        std::string fileName(entry->d_name);
-        foundPaths.push_back(fileName);
+    std::vector<std::string> dirsToVisit = {""};
 
+    while (!dirsToVisit.empty()) {
+        std::string relDir = std::move(dirsToVisit.back());
+        dirsToVisit.pop_back();
+
+        std::string fullDirPath = relDir.empty()
+            ? std::string(sdPath)
+            : (std::string(sdPath) + "/" + relDir);
+
+        DIR *dir = opendir(fullDirPath.c_str());
+        if (!dir) {
+            ESP_LOGW(TAG, "Failed to open directory: %s", fullDirPath.c_str());
+            continue;
+        }
+
+        struct dirent *entry;
+        while ((entry = readdir(dir)) != NULL) {
+            if (entry->d_name[0] == '.') continue; // skip ., .., and hidden files/folders
+
+            if (entry->d_type == DT_DIR) {
+                if (relDir.empty() &&
+                    (strcmp(entry->d_name, "book_data") == 0 ||
+                     strcmp(entry->d_name, "fonts") == 0 ||
+                     strcasecmp(entry->d_name, "System Volume Information") == 0)) {
+                    continue;
+                }
+                std::string subRelDir = relDir.empty()
+                    ? std::string(entry->d_name)
+                    : (relDir + "/" + entry->d_name);
+                dirsToVisit.push_back(std::move(subRelDir));
+            } else if (ends_with_epub(entry->d_name)) {
+                std::string relFilePath = relDir.empty()
+                    ? std::string(entry->d_name)
+                    : (relDir + "/" + entry->d_name);
+                foundPaths.push_back(std::move(relFilePath));
+            }
+        }
+        closedir(dir);
+    }
+
+    for (const std::string &fileName : foundPaths) {
         Book *book = nullptr;
         auto it = indexedBooks.find(fileName);
 
@@ -737,7 +794,6 @@ void BookHandler::listBooks(void)
 
         if (dev.activeBookPath.empty()) dev.activeBookPath = fileName;
     }
-    closedir(dir);
     // Step 3: Prune metadata for missing books (not found in /sdcard)
 const char *basePath =
     Device::getInstance().deviceSettings.storeDataOnSD
@@ -749,7 +805,7 @@ for (auto it = indexedBooks.begin(); it != indexedBooks.end();) {
 
         if (it->second->badParse) {
             std::string metaFile =
-                std::string(basePath) + "/" + it->first + ".json";
+                std::string(basePath) + "/" + getBookMetaFilename(it->first);
 
             if (unlink(metaFile.c_str()) == 0) {
                 ESP_LOGI(TAG, "Pruned stale bad-parse metadata: %s", metaFile.c_str());
