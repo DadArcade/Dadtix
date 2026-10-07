@@ -343,16 +343,8 @@ void Reader::indexPages(void)
     book->cachedImages.clear();
     book->totalPageCount = 0;
     book->chapterCount = this->epub->get_spine_items_count();
-    float percent = 0;
-    float prevPercent = 0;
     for(int i=0;i<epub->get_spine_items_count();i++)
     {
-        percent += 1/float(epub->get_spine_items_count());
-        if(percent>=prevPercent+0.1) 
-        {
-            prevPercent += 0.1;
-            Device::getInstance().notificationHandler->drawIndexingNotification(book->title,int(100*percent));
-        }
         std::string currentChapterPath = epub->get_spine_item(i);
         char *html = reinterpret_cast<char *>(this->epub->get_item_contents(currentChapterPath));
         if(html)
