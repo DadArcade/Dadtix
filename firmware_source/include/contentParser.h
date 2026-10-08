@@ -22,12 +22,12 @@ class ContentParser {
 public:
     ContentParser(Renderer* renderer);
     ~ContentParser();
-    void parseTextBlock(const std::vector<int> textBlock, bool newLine, Style style, bool draw);
+    void parseTextBlock(const std::vector<int>& textBlock, bool newLine, Style style, bool draw);
     void parseImage(Image& image, Style& style,bool draw);
     void parseOverflowedImage(Style style,bool draw);
     void finishLine(bool draw, int align=LEFT_ALIGN);
     void finishPage(bool draw=false);
-    void flushToOVerflowBuffer(std::vector<int> textBlock,int textBlockIndex);
+    void flushToOVerflowBuffer(const std::vector<int>& textBlock,int textBlockIndex);
     //int lineBuffer[60];
     //bool boldMask[60];
     //bool italicsMask[60];
@@ -36,6 +36,7 @@ public:
     std::vector <int> lineBuffer;
     std::vector <int> boldMask;
     std::vector <int> italicsMask;
+    int lineCharCount = 0;
     int lineBufferWidth=0;
     int maxLines = 0;
     int fontHeight = 0;

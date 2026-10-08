@@ -113,9 +113,9 @@ bool HtmlParser::VisitEnter(const tinyxml2::XMLElement &element, const tinyxml2:
         ESP_LOGI(TAG, "loading image: %s", src);
         Image image = Image(imagePath,epub->get_path());
         bool drawPage = (this->currentPage==this->targetPage || this->currentPage==this->targetPage+1);
-        if(!drawPage && indexingMode == false)
+        if(!drawPage)
         {
-          for(int i=0;i<cachedImages.size();i++)
+          for(size_t i=0;i<cachedImages.size();i++)
           {
             if(cachedImages[i].filePath==imagePath)
             {
@@ -123,7 +123,7 @@ bool HtmlParser::VisitEnter(const tinyxml2::XMLElement &element, const tinyxml2:
               image.cached=true;
               image.imageHeight = cachedImages[i].height;
               image.imageWidth = cachedImages[i].width;
-              i=cachedImages.size();
+              break;
             }
           }
         }
@@ -156,7 +156,7 @@ bool HtmlParser::VisitEnter(const tinyxml2::XMLElement &element, const tinyxml2:
             contentParser->parseOverflowedImage(styleHierarchy.back(), drawPage);
         }
 
-        if(image.cached==false) cachedImages.emplace_back(imagePath,image.imageHeight,image.imageWidth);
+        if(image.cached==false) cachedImages.push_back({imagePath,image.imageWidth,image.imageHeight});
         this->styleHierarchy.pop_back();
       }
 
@@ -405,7 +405,7 @@ void HtmlParser::emptyTextOverflow()
   while(textOverFlowRemaining)
   {
     bool drawPage = (this->currentPage==this->targetPage || this->currentPage==this->targetPage+1);
-    std::vector <int> textOverflowBufferCopy = contentParser->textOverflowBuffer;
+    std::vector <int> textOverflowBufferCopy = std::move(contentParser->textOverflowBuffer);
     contentParser->textOverflowBuffer.clear();
     this->contentParser->parseTextBlock(textOverflowBufferCopy,false,styleHierarchy.back(),drawPage);
     if(contentParser->textOverflowBuffer.size())

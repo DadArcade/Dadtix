@@ -15,6 +15,7 @@ ContentParser::ContentParser(Renderer* renderer)
     this->renderer = renderer;
     this->currentLine = 0;
     this->currentTextBlockIndex = 0;
+    this->lineCharCount = 0;
 }
 
 ContentParser::~ContentParser()
@@ -29,15 +30,22 @@ void ContentParser::finishLine(bool draw, int align)
         if(align==LEFT_ALIGN) this->renderer->drawString((GLYPH_WIDTH/2)*(1+Device::getInstance().renderSettings.marginsHorizontal),yPos,this->lineBuffer,fontSize,boldMask,italicsMask,true,false);
         if(align==RIGHT_ALIGN) this->renderer->drawString(EPD_HEIGHT-(Device::getInstance().renderSettings.marginsHorizontal * GLYPH_WIDTH/2)-(lineBufferWidth)*fontSize,yPos,this->lineBuffer,fontSize,boldMask,italicsMask,true,false);
         if(align==CENTERED) this->renderer->drawString((EPD_HEIGHT-lineBufferWidth*fontSize)/2,yPos,this->lineBuffer,fontSize,boldMask,italicsMask,true,false);
+        lineBuffer.clear();
+        boldMask.clear();
+        italicsMask.clear();
+        lineBuffer.reserve(100);
+        boldMask.reserve(100);
+        italicsMask.reserve(100);
+    }
+    else if(!lineBuffer.empty())
+    {
+        lineBuffer.clear();
+        boldMask.clear();
+        italicsMask.clear();
     }
     this->currentLine++;
-    lineBuffer.clear();
-    boldMask.clear();
-    italicsMask.clear();
-    lineBuffer.reserve(100);
-    boldMask.reserve(100);
-    italicsMask.reserve(100);
     lineBufferWidth=0;
+    lineCharCount=0;
     this->fontSize = 1;
 }
 
@@ -139,7 +147,7 @@ void ContentParser::parseOverflowedImage(Style style,bool draw)
     this->imageOverflowBuffer= nullptr;
 }
 
-void ContentParser::parseTextBlock(const std::vector<int> textBlock, bool newLine, Style style, bool draw)
+void ContentParser::parseTextBlock(const std::vector<int>& textBlock, bool newLine, Style style, bool draw)
 {
     fontHeight = Device::getInstance().renderer->fontHandler.currentFont.lineHeight + Device::getInstance().renderSettings.lineSpacing;
     maxLines = (EPD_WIDTH/fontHeight)-Device::getInstance().renderSettings.marginsVertical-1;
@@ -154,14 +162,18 @@ void ContentParser::parseTextBlock(const std::vector<int> textBlock, bool newLin
     int nextSpaceDistance = 0;
     int nextSpaceIndex = 0;
     int textBlockSize = textBlock.size();
-    if(this->lineBuffer.size()==0) 
+    if(this->lineCharCount==0) 
     {
         for(int i=0;i<2*style.indent;i++) 
         {
-            lineBuffer.push_back(32);
-            boldMask.push_back(0);
-            italicsMask.push_back(0);  
+            if(draw)
+            {
+                lineBuffer.push_back(32);
+                boldMask.push_back(0);
+                italicsMask.push_back(0);
+            }
             lineBufferWidth+= Device::getInstance().renderer->fontHandler.getFontCharWidth(32)  + bold;
+            lineCharCount++;
         }
     }
     
@@ -209,9 +221,13 @@ void ContentParser::parseTextBlock(const std::vector<int> textBlock, bool newLin
             return;
         }
 
-        lineBuffer.push_back(textBlock[textBlockIndex]);
-        boldMask.push_back(bold);
-        italicsMask.push_back(italics);
+        if(draw)
+        {
+            lineBuffer.push_back(textBlock[textBlockIndex]);
+            boldMask.push_back(bold);
+            italicsMask.push_back(italics);
+        }
+        lineCharCount++;
         //lineBufferWidth+=renderer->fontHandler.getCharWidth(textBlock[textBlockIndex]);
         lineBufferWidth+=Device::getInstance().renderer->fontHandler.getFontCharWidth(textBlock[textBlockIndex]) + bold;
         nextSpaceDistance-=Device::getInstance().renderer->fontHandler.getFontCharWidth(textBlock[textBlockIndex]) + bold;
@@ -230,9 +246,9 @@ void ContentParser::parseTextBlock(const std::vector<int> textBlock, bool newLin
 
 }
 
-void ContentParser::flushToOVerflowBuffer(std::vector<int> textBlock,int textBlockIndex)
+void ContentParser::flushToOVerflowBuffer(const std::vector<int>& textBlock,int textBlockIndex)
 {
-    for(int i=textBlockIndex;i<textBlock.size();i++)
+    for(size_t i=textBlockIndex;i<textBlock.size();i++)
     {
         this->textOverflowBuffer.push_back(textBlock[i]);
     }
