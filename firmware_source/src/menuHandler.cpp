@@ -208,13 +208,13 @@ auto fileTransferButton = std::make_shared<ActionElement>(
 
     currentElement = authorMenu;
     mainMenu->addChild(authorMenu);
-    mainMenu->addChild(manualButton);
-    mainMenu->addChild(versionButton);
     mainMenu->addChild(settingsMenu);
     mainMenu->addChild(fileTransferButton);
     settingsMenu->addChild(readSettingsMenu);
     settingsMenu->addChild(deviceSettingsMenu);
     settingsMenu->addChild(einkSettingsMenu);
+    settingsMenu->addChild(manualButton);
+    settingsMenu->addChild(versionButton);
     layoutFontSelect();
     updateFontSize();
     readSettingsMenu->addChild(fontSizeBox);
