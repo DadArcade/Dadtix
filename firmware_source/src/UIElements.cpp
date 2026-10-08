@@ -104,7 +104,7 @@ void ValueElement::renderIcon(int y, bool highlight)
         if(selectedValueIndex<values.size()-1  || infinitescrolling==true) valueString = valueString + " >";
     }
     int stringWidth = (valueString.length()+1) * GLYPH_WIDTH/2;
-    int textStartX = EPD_HEIGHT - 24 - stringWidth;
+    int textStartX = EPD_HEIGHT - 48 - stringWidth;
     if(!selected) renderer->drawString(textStartX, y + 1.5 * GLYPH_HEIGHT,valueString, 1,true, false, !highlight);
     else
     {
@@ -112,7 +112,7 @@ void ValueElement::renderIcon(int y, bool highlight)
         renderer->drawString(textStartX, y + 1.5 * GLYPH_HEIGHT,valueString, 1,true, false, true);
     }
     drawValueYPos = y + 1.5 * GLYPH_HEIGHT;
-    drawValueXPos = EPD_HEIGHT - 24 - (maxStringWidth+1)*GLYPH_WIDTH/2;
+    drawValueXPos = EPD_HEIGHT - 48 - (maxStringWidth+1)*GLYPH_WIDTH/2;
 }
 
 void ValueElement::writeValue()

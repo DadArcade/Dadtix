@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <unordered_map>
 #include <cctype>
+#include <cmath>
 #include "device.h"
 
 
@@ -355,37 +356,149 @@ void Renderer::drawPaddedBox(int startx, int starty, int lengthx, int lengthy, i
     }
 }
 
+void Renderer::drawGothicBox(int x, int y, int width, int height, bool inverted)
+{
+    if (height <= 0 || width <= 0) return;
+
+    // Classic Gothic window pointed arch (ogival / two-centered arch),
+    // created by two intersecting circular arcs on the left and right ends.
+    int d = height / 2;
+    int x_left_tip = x;
+    int x_right_tip = x + width;
+    int x_sh_left = x_left_tip + d;
+    int x_sh_right = x_right_tip - d;
+
+    std::vector<int> outer_lx(height), outer_rx(height);
+    std::vector<int> inner_lx(height), inner_rx(height);
+
+    const int moulding_gap = 3;
+
+    // Two intersecting circular arcs:
+    // Lower arc (y_local <= height/2): circle centered at (x_c, height)
+    // Upper arc (y_local > height/2): circle centered at (x_c, 0)
+    float x_c = (float)(d * d - 0.75f * height * height) / (2.0f * (float)d);
+    float R_sq = x_c * x_c + (float)(height * height);
+
+    int in_h = height - 2 * moulding_gap;
+    int in_d = d - moulding_gap;
+    if (in_d < 4) in_d = 4;
+    float in_x_c = (float)(in_d * in_d - 0.75f * in_h * in_h) / (2.0f * (float)in_d);
+    float in_R_sq = in_x_c * in_x_c + (float)(in_h * in_h);
+
+    for (int i = 0; i < height; i++) {
+        float dy = (i <= height / 2) ? (float)(height - 1 - i) : (float)i;
+        float term = R_sq - dy * dy;
+        int off = (int)roundf(x_c + sqrtf(term > 0.0f ? term : 0.0f));
+        if (off < 0) off = 0;
+        outer_lx[i] = x_sh_left - off;
+        outer_rx[i] = x_sh_right + off;
+
+        int in_y = i - moulding_gap;
+        if (in_y < 0) in_y = 0;
+        if (in_y >= in_h) in_y = in_h - 1;
+        float in_dy = (in_y <= in_h / 2) ? (float)(in_h - 1 - in_y) : (float)in_y;
+        float in_term = in_R_sq - in_dy * in_dy;
+        int in_off = (int)roundf(in_x_c + sqrtf(in_term > 0.0f ? in_term : 0.0f));
+        if (in_off < 0) in_off = 0;
+        inner_lx[i] = x_sh_left - in_off;
+        inner_rx[i] = x_sh_right + in_off;
+    }
+
+    // 1. Cast shadow (offset down and right: sh_dx = +4, sh_dy = -4)
+    // 50% checkerboard dither for soft e-paper drop shadow
+    const int sh_dx = 4;
+    const int sh_dy = -4;
+    for (int i = 0; i < height; i++) {
+        int cy = y + i + sh_dy;
+        if (cy >= 0 && cy < EPD_WIDTH) {
+            int slx = outer_lx[i] + sh_dx;
+            int srx = outer_rx[i] + sh_dx;
+            for (int cx = slx; cx <= srx; cx++) {
+                if ((cx + cy) % 2 == 0) {
+                    drawPixel(cx, cy, false);
+                }
+            }
+        }
+    }
+
+    // 2. Fill background
+    // false = black (inverted/selected), true = white (unselected)
+    bool fill_val = inverted ? false : true;
+    for (int i = 0; i < height; i++) {
+        int cy = y + i;
+        int lx = outer_lx[i];
+        int rx = outer_rx[i];
+        for (int cx = lx; cx <= rx; cx++) {
+            drawPixel(cx, cy, fill_val);
+        }
+    }
+
+    // 3. Outer border (2 pixels thick, black)
+    for (int cx = x_sh_left; cx <= x_sh_right; cx++) {
+        drawPixel(cx, y, false);
+        drawPixel(cx, y + 1, false);
+        drawPixel(cx, y + height - 1, false);
+        drawPixel(cx, y + height - 2, false);
+    }
+    for (int i = 0; i < height; i++) {
+        int cy = y + i;
+        drawPixel(outer_lx[i], cy, false);
+        drawPixel(outer_lx[i] + 1, cy, false);
+        drawPixel(outer_rx[i], cy, false);
+        drawPixel(outer_rx[i] - 1, cy, false);
+    }
+
+    // 4. Inner stone moulding (double border following the gothic window shape)
+    // White (true) when inverted, black (false) when normal
+    bool inner_val = inverted ? true : false;
+    for (int cx = x_sh_left; cx <= x_sh_right; cx++) {
+        drawPixel(cx, y + moulding_gap, inner_val);
+        drawPixel(cx, y + height - 1 - moulding_gap, inner_val);
+    }
+    for (int i = moulding_gap; i < height - moulding_gap; i++) {
+        int cy = y + i;
+        drawPixel(inner_lx[i], cy, inner_val);
+        drawPixel(inner_rx[i], cy, inner_val);
+    }
+}
+
 void Renderer::drawTextBox(int y, std::string line1, bool line1Bold,bool inverted)
 {
-    int originX = GLYPH_WIDTH;
+    int originX = 14;
     int rectHeight = 2 * GLYPH_HEIGHT;
     int rectWidth = EPD_HEIGHT - 2 * originX;
     int padding = 4;
-    drawPaddedBox(originX,y,rectWidth,rectHeight,padding,!inverted);
-    drawString(originX + GLYPH_WIDTH/2, y + 0.5*GLYPH_HEIGHT + padding,line1,1,line1Bold,false,!inverted);
+    int d = rectHeight / 2;
+    int textStartX = originX + d + 8;
+    drawGothicBox(originX, y, rectWidth, rectHeight, inverted);
+    drawString(textStartX, y + 0.5*GLYPH_HEIGHT + padding, line1, 1, line1Bold, false, !inverted);
 }
 
 void Renderer::drawTextBox(int y, std::string line1, bool line1Bold,std::string line2, bool line2Bold,bool inverted)
 {
-    int originX = GLYPH_WIDTH;
+    int originX = 14;
     int rectHeight = 3 * GLYPH_HEIGHT;
     int rectWidth = EPD_HEIGHT - 2 * originX;
     int padding = 4;
-    drawPaddedBox(originX,y,rectWidth,rectHeight,padding,!inverted);
-    drawString(originX + GLYPH_WIDTH/2, y + 1.5*GLYPH_HEIGHT + padding,line1,1,line1Bold,false,!inverted);
-    drawString(originX + GLYPH_WIDTH/2, y + 0.5*GLYPH_HEIGHT + padding,line2,1,line2Bold,false,!inverted);
+    int d = rectHeight / 2;
+    int textStartX = originX + d + 8;
+    drawGothicBox(originX, y, rectWidth, rectHeight, inverted);
+    drawString(textStartX, y + 1.5*GLYPH_HEIGHT + padding, line1, 1, line1Bold, false, !inverted);
+    drawString(textStartX, y + 0.5*GLYPH_HEIGHT + padding, line2, 1, line2Bold, false, !inverted);
 }
 
 void Renderer::drawTextBox(int y, std::string line1, bool line1Bold,std::string line2, bool line2Bold,std::string line3, bool line3Bold,bool inverted)
 {
-    int originX = GLYPH_WIDTH;
+    int originX = 14;
     int rectHeight = 4 * GLYPH_HEIGHT;
     int rectWidth = EPD_HEIGHT - 2 * originX;
     int padding = 4;
-    drawPaddedBox(originX,y,rectWidth,rectHeight,padding,!inverted);
-    drawString(originX + GLYPH_WIDTH/2, y + 2.5*GLYPH_HEIGHT + padding,line1,1,line1Bold,false,!inverted);
-    drawString(originX + GLYPH_WIDTH/2, y + 1.5*GLYPH_HEIGHT + padding,line2,1,line2Bold,false,!inverted);
-    drawString(originX + GLYPH_WIDTH/2, y + 0.5*GLYPH_HEIGHT + padding,line3,1,line3Bold,false,!inverted);
+    int d = rectHeight / 2;
+    int textStartX = originX + d + 8;
+    drawGothicBox(originX, y, rectWidth, rectHeight, inverted);
+    drawString(textStartX, y + 2.5*GLYPH_HEIGHT + padding, line1, 1, line1Bold, false, !inverted);
+    drawString(textStartX, y + 1.5*GLYPH_HEIGHT + padding, line2, 1, line2Bold, false, !inverted);
+    drawString(textStartX, y + 0.5*GLYPH_HEIGHT + padding, line3, 1, line3Bold, false, !inverted);
 }
 
 void Renderer::drawPixel(int x, int y, bool value)

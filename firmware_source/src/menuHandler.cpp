@@ -9,6 +9,8 @@
 #include "tinyusb_cdc_acm.h"
 #include "tinyusb_console.h"
 #include "tinyusb_default_config.h"
+#include <algorithm>
+#include <utility>
 
 #ifndef FIRMWARE_VERSION
 #define FIRMWARE_VERSION "unknown"
@@ -542,6 +544,435 @@ void MenuHandler::updateFont()
     }
 }
 
+static std::string truncateString(const std::string& str, size_t maxLen) {
+    if (str.length() <= maxLen) return str;
+    if (maxLen <= 3) return str.substr(0, maxLen);
+    return str.substr(0, maxLen - 3) + "...";
+}
+
+static std::pair<std::string, std::string> splitTitle(const std::string& title, size_t maxLenPerLine) {
+    if (title.length() <= maxLenPerLine) {
+        return { title, "" };
+    }
+    size_t splitPos = title.rfind(' ', maxLenPerLine);
+    if (splitPos == std::string::npos || splitPos < maxLenPerLine / 2) {
+        splitPos = maxLenPerLine;
+    }
+    std::string line1 = title.substr(0, splitPos);
+    std::string line2 = title.substr(splitPos + (title[splitPos] == ' ' ? 1 : 0));
+    if (line2.length() > maxLenPerLine) {
+        line2 = truncateString(line2, maxLenPerLine);
+    }
+    return { line1, line2 };
+}
+
+static void drawOrnamentalCard(Renderer* renderer, int x, int y, int width, int height)
+{
+    if (!renderer || width <= 0 || height <= 0) return;
+
+    // 1. Cast shadow (offset +3 in X, -3 in Y, 50% checkerboard dither)
+    const int sh_dx = 3;
+    const int sh_dy = -3;
+    for (int i = 0; i < height; i++) {
+        int cy = y + i + sh_dy;
+        if (cy >= 0 && cy < EPD_WIDTH) {
+            int slx = x + sh_dx;
+            int srx = x + width + sh_dx;
+            for (int cx = slx; cx <= srx; cx++) {
+                if (cx >= 0 && cx < EPD_HEIGHT && (cx + cy) % 2 == 0) {
+                    renderer->drawPixel(cx, cy, false);
+                }
+            }
+        }
+    }
+
+    // 2. White background fill
+    for (int i = 0; i < height; i++) {
+        int cy = y + i;
+        if (cy >= 0 && cy < EPD_WIDTH) {
+            for (int cx = x; cx <= x + width; cx++) {
+                if (cx >= 0 && cx < EPD_HEIGHT) {
+                    renderer->drawPixel(cx, cy, true);
+                }
+            }
+        }
+    }
+
+    // 3. Outer border (2 pixels thick, black)
+    for (int cx = x; cx <= x + width; cx++) {
+        renderer->drawPixel(cx, y, false);
+        renderer->drawPixel(cx, y + 1, false);
+        renderer->drawPixel(cx, y + height - 1, false);
+        renderer->drawPixel(cx, y + height - 2, false);
+    }
+    for (int cy = y; cy <= y + height; cy++) {
+        renderer->drawPixel(x, cy, false);
+        renderer->drawPixel(x + 1, cy, false);
+        renderer->drawPixel(x + width, cy, false);
+        renderer->drawPixel(x + width - 1, cy, false);
+    }
+
+    // 4. Inner stone moulding (1 pixel line, 3 pixels inside)
+    const int gap = 3;
+    if (width > 2 * gap && height > 2 * gap) {
+        for (int cx = x + gap; cx <= x + width - gap; cx++) {
+            renderer->drawPixel(cx, y + gap, false);
+            renderer->drawPixel(cx, y + height - 1 - gap, false);
+        }
+        for (int cy = y + gap; cy <= y + height - gap; cy++) {
+            renderer->drawPixel(x + gap, cy, false);
+            renderer->drawPixel(x + width - gap, cy, false);
+        }
+    }
+
+    // 5. Corner diamond / notch accents (classic Gothic touch)
+    const int c_off = 7;
+    int corners_x[4] = { x + c_off, x + width - c_off, x + c_off, x + width - c_off };
+    int corners_y[4] = { y + c_off, y + c_off, y + height - 1 - c_off, y + height - 1 - c_off };
+    for (int c = 0; c < 4; c++) {
+        renderer->drawPixel(corners_x[c], corners_y[c], false);
+        renderer->drawPixel(corners_x[c] - 1, corners_y[c], false);
+        renderer->drawPixel(corners_x[c] + 1, corners_y[c], false);
+        renderer->drawPixel(corners_x[c], corners_y[c] - 1, false);
+        renderer->drawPixel(corners_x[c], corners_y[c] + 1, false);
+    }
+}
+
+void MenuHandler::drawBookInfo(Book *book)
+{
+    if (!book || !renderer) return;
+
+    // 1. Top Header Gothic Box
+    renderer->drawGothicBox(80, 595, 320, 38, true);
+    std::string headerText = "✦  BOOK DETAILS  ✦";
+    int hx = (EPD_HEIGHT - headerText.length() * 8) / 2;
+    renderer->drawString(hx, 606, headerText, 1, true, false, false);
+
+    // 2. Book Title & Author Card
+    drawOrnamentalCard(renderer, 16, 490, 448, 95);
+    std::string titleStr = book->title.empty() ? book->path : book->title;
+    auto titleLines = splitTitle(titleStr, 34);
+    if (titleLines.second.empty()) {
+        int tx = 16 + (448 - titleLines.first.length() * 8) / 2;
+        if (tx < 30) tx = 30;
+        renderer->drawString(tx, 546, titleLines.first, 1, true, false, true);
+    } else {
+        int tx1 = 16 + (448 - titleLines.first.length() * 8) / 2;
+        int tx2 = 16 + (448 - titleLines.second.length() * 8) / 2;
+        if (tx1 < 30) tx1 = 30;
+        if (tx2 < 30) tx2 = 30;
+        renderer->drawString(tx1, 554, titleLines.first, 1, true, false, true);
+        renderer->drawString(tx2, 536, titleLines.second, 1, true, false, true);
+    }
+
+    std::string authorStr = "by " + (book->author.empty() ? "Unknown Author" : book->author);
+    if (book->favorite) authorStr += "  ❤";
+    authorStr = truncateString(authorStr, 40);
+    int ax = 16 + (448 - authorStr.length() * 8) / 2;
+    if (ax < 30) ax = 30;
+    renderer->drawString(ax, 508, authorStr, 1, false, false, true);
+
+    // 3. Reading Progress & Status Card
+    drawOrnamentalCard(renderer, 16, 360, 448, 118);
+
+    std::string statusStr;
+    if (book->badParse) {
+        statusStr = "ERROR (Corrupt File)";
+    } else if (book->totalPageCount <= 0) {
+        statusStr = "UNINDEXED (Open to parse)";
+    } else if (book->currentPage >= book->totalPageCount - 2) {
+        statusStr = "COMPLETED ★";
+    } else if (book->currentPage > 0) {
+        statusStr = "IN PROGRESS";
+    } else {
+        statusStr = "UNREAD";
+    }
+
+    int percent = 0;
+    if (book->totalPageCount > 1) {
+        percent = (book->currentPage * 100) / (book->totalPageCount - 1);
+        if (percent < 0) percent = 0;
+        if (percent > 100) percent = 100;
+    } else if (book->totalPageCount == 1 && book->currentPage >= 1) {
+        percent = 100;
+    }
+
+    std::string statusLine = "Status : " + statusStr;
+    renderer->drawString(32, 452, statusLine, 1, true, false, true);
+
+    std::string pageLine;
+    if (book->totalPageCount > 0) {
+        pageLine = "Page " + std::to_string(book->currentPage + 1) + " of " + std::to_string(book->totalPageCount) + " (" + std::to_string(percent) + "% completed)";
+    } else {
+        pageLine = "Page count unknown";
+    }
+    renderer->drawString(32, 430, pageLine, 1, false, false, true);
+
+    // Custom Outlined Progress Bar
+    int pb_x = 32;
+    int pb_y = 404;
+    int pb_w = 416;
+    int pb_h = 14;
+    for (int cx = pb_x; cx < pb_x + pb_w; cx++) {
+        renderer->drawPixel(cx, pb_y, false);
+        renderer->drawPixel(cx, pb_y + 1, false);
+        renderer->drawPixel(cx, pb_y + pb_h - 1, false);
+        renderer->drawPixel(cx, pb_y + pb_h - 2, false);
+    }
+    for (int cy = pb_y; cy < pb_y + pb_h; cy++) {
+        renderer->drawPixel(pb_x, cy, false);
+        renderer->drawPixel(pb_x + 1, cy, false);
+        renderer->drawPixel(pb_x + pb_w - 1, cy, false);
+        renderer->drawPixel(pb_x + pb_w - 2, cy, false);
+    }
+    int inner_w = pb_w - 6;
+    int inner_h = pb_h - 6;
+    int fill_w = (inner_w * percent) / 100;
+    for (int cy = pb_y + 3; cy < pb_y + 3 + inner_h; cy++) {
+        for (int cx = pb_x + 3; cx < pb_x + 3 + inner_w; cx++) {
+            if (cx < pb_x + 3 + fill_w) {
+                renderer->drawPixel(cx, cy, false);
+            } else {
+                if ((cx % 2 == 0) && (cy % 2 == 0)) {
+                    renderer->drawPixel(cx, cy, false);
+                } else {
+                    renderer->drawPixel(cx, cy, true);
+                }
+            }
+        }
+    }
+
+    std::string chapterProgress;
+    if (book->chapterCount > 0) {
+        chapterProgress = "Chapter " + std::to_string(book->currentPageChapterIndex + 1) + " of " + std::to_string(book->chapterCount);
+        if (book->chapterPageCounts.size() > (size_t)book->currentPageChapterIndex && book->chapterPageCounts[book->currentPageChapterIndex] > 0) {
+            chapterProgress += " (" + std::to_string(book->chapterPageCounts[book->currentPageChapterIndex]) + " pages in chapter)";
+        }
+    } else {
+        chapterProgress = "Chapters: None indexed";
+    }
+    renderer->drawString(32, 378, truncateString(chapterProgress, 46), 1, false, false, true);
+
+    // 4. Book Metadata & Specifications Card
+    drawOrnamentalCard(renderer, 16, 88, 448, 260);
+    std::string metaHeader = "✦  SPECIFICATIONS & SETTINGS  ✦";
+    int mhx = 16 + (448 - metaHeader.length() * 8) / 2;
+    renderer->drawString(mhx, 324, metaHeader, 1, true, false, true);
+    for (int cx = 32; cx <= 448; cx++) {
+        renderer->drawPixel(cx, 316, false);
+    }
+
+    std::string bmStr;
+    if (book->bookMarks.empty()) {
+        bmStr = "None";
+    } else {
+        bmStr = std::to_string(book->bookMarks.size()) + " saved (p.";
+        for (size_t i = 0; i < std::min((size_t)4, book->bookMarks.size()); i++) {
+            if (i > 0) bmStr += ", ";
+            bmStr += std::to_string(book->bookMarks[i].pageIndex + 1);
+        }
+        if (book->bookMarks.size() > 4) bmStr += ", ...";
+        bmStr += ")";
+    }
+
+    std::string shortPath = book->path;
+    size_t lastSlash = shortPath.find_last_of("/\\");
+    if (lastSlash != std::string::npos) shortPath = shortPath.substr(lastSlash + 1);
+    shortPath = truncateString(shortPath, 28);
+
+    std::string fontName = book->renderSettings.fontFamily.empty() ? "System Default" : book->renderSettings.fontFamily;
+    std::string fontPt = book->renderSettings.fontPoints > 0 ? (std::to_string(book->renderSettings.fontPoints) + " px") : "Default (14 px)";
+
+    renderer->drawString(32, 292, "Chapters   : " + std::to_string(book->chapterCount) + (book->chapterCount == 1 ? " chapter" : " chapters"), 1, false, false, true);
+    renderer->drawString(32, 270, truncateString("Bookmarks  : " + bmStr, 46), 1, false, false, true);
+    renderer->drawString(32, 248, "Favorite   : " + std::string(book->favorite ? "Yes (❤ Marked in Favorites)" : "No"), 1, false, false, true);
+    renderer->drawString(32, 226, "File Name  : " + shortPath, 1, false, false, true);
+    renderer->drawString(32, 204, "Storage    : " + std::string(Device::getInstance().deviceSettings.storeDataOnSD ? "SD Card (/sdcard)" : "Internal Flash (/littlefs)"), 1, false, false, true);
+    renderer->drawString(32, 182, "Font Style : " + fontName + " • " + fontPt, 1, false, false, true);
+    renderer->drawString(32, 160, "Weight     : " + std::string(book->renderSettings.fontBold ? "Bold text" : "Standard weight"), 1, false, false, true);
+    renderer->drawString(32, 138, "Margins    : Horiz " + std::to_string(book->renderSettings.marginsHorizontal) + "em / Vert " + std::to_string(book->renderSettings.marginsVertical) + "em", 1, false, false, true);
+    renderer->drawString(32, 116, "Line Space : " + std::to_string(book->renderSettings.lineSpacing) + " px additional", 1, false, false, true);
+
+    // 5. Bottom Navigation Legend (Inverted Gothic Box)
+    renderer->drawGothicBox(16, 32, 448, 42, true);
+    std::string legend = "▶ Open Book     ● Toggle Fav     ◀ Back";
+    int lx = (EPD_HEIGHT - legend.length() * 8) / 2;
+    renderer->drawString(lx, 45, legend, 1, true, false, false);
+}
+
+void MenuHandler::drawAuthorInfo(Author *author)
+{
+    if (!author || !renderer) return;
+
+    bool isFavorites = (author->name == "Favorite books");
+
+    // 1. Top Header Gothic Box
+    renderer->drawGothicBox(80, 595, 320, 38, true);
+    std::string headerText = isFavorites ? "✦  FAVORITE BOOKS  ✦" : "✦  AUTHOR OVERVIEW  ✦";
+    int hx = (EPD_HEIGHT - headerText.length() * 8) / 2;
+    renderer->drawString(hx, 606, headerText, 1, true, false, false);
+
+    // 2. Author Name Card
+    drawOrnamentalCard(renderer, 16, 490, 448, 95);
+    std::string authorDisplayName = isFavorites ? "Favorite Collection ❤" : author->name;
+    authorDisplayName = truncateString(authorDisplayName, 34);
+    int ax = 16 + (448 - authorDisplayName.length() * 8) / 2;
+    if (ax < 30) ax = 30;
+    renderer->drawString(ax, 546, authorDisplayName, 1, true, false, true);
+
+    std::string countStr = std::to_string(author->bookList.size()) + (author->bookList.size() == 1 ? " Book in Collection" : " Books in Collection");
+    int cx = 16 + (448 - countStr.length() * 8) / 2;
+    if (cx < 30) cx = 30;
+    renderer->drawString(cx, 514, countStr, 1, false, false, true);
+
+    // 3. Collection Statistics Card
+    drawOrnamentalCard(renderer, 16, 360, 448, 118);
+    std::string statsHeader = "✦  COLLECTION STATISTICS  ✦";
+    int shx = 16 + (448 - statsHeader.length() * 8) / 2;
+    renderer->drawString(shx, 454, statsHeader, 1, true, false, true);
+    for (int cx = 32; cx <= 448; cx++) {
+        renderer->drawPixel(cx, 446, false);
+    }
+
+    int totalPages = 0;
+    int completedCount = 0;
+    int inProgressCount = 0;
+    int unreadCount = 0;
+    int favoriteCount = 0;
+    int totalBookmarks = 0;
+
+    for (Book* b : author->bookList) {
+        if (!b) continue;
+        totalPages += b->totalPageCount;
+        if (b->favorite) favoriteCount++;
+        totalBookmarks += b->bookMarks.size();
+        if (b->totalPageCount > 0 && b->currentPage >= b->totalPageCount - 2) {
+            completedCount++;
+        } else if (b->currentPage > 0) {
+            inProgressCount++;
+        } else {
+            unreadCount++;
+        }
+    }
+
+    renderer->drawString(32, 422, "Total Pages  : " + std::to_string(totalPages) + " pages across " + std::to_string(author->bookList.size()) + " books", 1, false, false, true);
+    renderer->drawString(32, 398, "Progress     : " + std::to_string(completedCount) + " finished, " + std::to_string(inProgressCount) + " reading, " + std::to_string(unreadCount) + " unread", 1, false, false, true);
+    renderer->drawString(32, 374, "Saved Data   : " + std::to_string(totalBookmarks) + " bookmarks, " + std::to_string(favoriteCount) + " favorited", 1, false, false, true);
+
+    // 4. Books in Collection Card
+    drawOrnamentalCard(renderer, 16, 88, 448, 260);
+    std::string booksHeader = isFavorites ? "✦  FAVORITE TITLES  ✦" : "✦  BOOKS IN COLLECTION  ✦";
+    int bhx = 16 + (448 - booksHeader.length() * 8) / 2;
+    renderer->drawString(bhx, 324, booksHeader, 1, true, false, true);
+    for (int cx = 32; cx <= 448; cx++) {
+        renderer->drawPixel(cx, 316, false);
+    }
+
+    if (author->bookList.empty()) {
+        std::string empty1 = isFavorites ? "No favorite books added yet." : "No books found for this author.";
+        std::string empty2 = isFavorites ? "While browsing any book, press [●]" : "Add EPUB books to SD card to populate.";
+        std::string empty3 = isFavorites ? "to mark it as a favorite." : "";
+        renderer->drawString(32, 260, empty1, 1, false, false, true);
+        renderer->drawString(32, 230, empty2, 1, false, false, true);
+        if (!empty3.empty()) renderer->drawString(32, 204, empty3, 1, false, false, true);
+    } else {
+        int maxPreview = std::min((size_t)4, author->bookList.size());
+        for (int i = 0; i < maxPreview; i++) {
+            Book* b = author->bookList[i];
+            if (!b) continue;
+            int y_top = 286 - i * 46;
+
+            std::string titleDisplay = std::to_string(i + 1) + ". " + b->title;
+            if (b->favorite && !isFavorites) titleDisplay += " ❤";
+            titleDisplay = truncateString(titleDisplay, 46);
+            renderer->drawString(32, y_top, titleDisplay, 1, true, false, true);
+
+            std::string bookProg;
+            if (b->badParse) {
+                bookProg = "Parse Error";
+            } else if (b->totalPageCount <= 0) {
+                bookProg = "Unindexed";
+            } else if (b->currentPage >= b->totalPageCount - 2) {
+                bookProg = "Completed ★ (" + std::to_string(b->totalPageCount) + " pages)";
+            } else if (b->currentPage > 0) {
+                int pct = (b->currentPage * 100) / (b->totalPageCount - 1);
+                bookProg = "Page " + std::to_string(b->currentPage + 1) + "/" + std::to_string(b->totalPageCount) + " (" + std::to_string(pct) + "%)";
+            } else {
+                bookProg = "Unread (" + std::to_string(b->totalPageCount) + " pages)";
+            }
+            if (isFavorites && !b->author.empty()) {
+                bookProg += " • by " + b->author;
+            }
+            bookProg = "   " + truncateString(bookProg, 46);
+            renderer->drawString(32, y_top - 18, bookProg, 1, false, false, true);
+        }
+
+        if (author->bookList.size() > 4) {
+            std::string moreStr = "  + " + std::to_string(author->bookList.size() - 4) + " more book(s) in collection";
+            renderer->drawString(32, 98, moreStr, 1, false, false, true);
+        }
+    }
+
+    // 5. Bottom Navigation Legend (Inverted Gothic Box)
+    renderer->drawGothicBox(16, 32, 448, 42, true);
+    std::string legend = "▶ View Books     ● Enter Author     ◀ Back";
+    int lx = (EPD_HEIGHT - legend.length() * 8) / 2;
+    renderer->drawString(lx, 45, legend, 1, true, false, false);
+}
+
+void MenuHandler::drawLibraryDetails()
+{
+    if (!currentElement) return;
+
+    // RTTI is disabled (-fno-rtti), so use getType() + static_pointer_cast instead of dynamic_pointer_cast
+    UIElementType curType = currentElement->getType();
+    if (curType != UIElementType::Menu && curType != UIElementType::Author) return;
+    auto menu = std::static_pointer_cast<MenuElement>(currentElement);
+
+    if (menu->children.empty()) {
+        if (menu->getType() == UIElementType::Author) {
+            auto authorElem = std::static_pointer_cast<AuthorElement>(menu);
+            if (authorElem && authorElem->author) {
+                drawAuthorInfo(authorElem->author);
+                return;
+            }
+        } else if (currentElement == authorMenu) {
+            drawOrnamentalCard(renderer, 16, 220, 448, 180);
+            std::string line1 = "✦  LIBRARY IS EMPTY  ✦";
+            std::string line2 = "No EPUB books found on storage.";
+            std::string line3 = "Please add .epub books to SD card";
+            std::string line4 = "or use Transfer Files mode.";
+            int x1 = (EPD_HEIGHT - line1.length() * 8) / 2;
+            int x2 = (EPD_HEIGHT - line2.length() * 8) / 2;
+            int x3 = (EPD_HEIGHT - line3.length() * 8) / 2;
+            int x4 = (EPD_HEIGHT - line4.length() * 8) / 2;
+            renderer->drawString(x1, 350, line1, 1, true, false, true);
+            renderer->drawString(x2, 310, line2, 1, false, false, true);
+            renderer->drawString(x3, 280, line3, 1, false, false, true);
+            renderer->drawString(x4, 250, line4, 1, false, false, true);
+            return;
+        }
+        return;
+    }
+
+    if (menu->selectedChildIndex >= menu->children.size()) return;
+
+    auto selectedChild = menu->children[menu->selectedChildIndex];
+    if (!selectedChild) return;
+
+    if (selectedChild->getType() == UIElementType::Book) {
+        auto bookElem = std::static_pointer_cast<BookElement>(selectedChild);
+        if (bookElem && bookElem->book) {
+            drawBookInfo(bookElem->book);
+        }
+    } else if (selectedChild->getType() == UIElementType::Author) {
+        auto authorElem = std::static_pointer_cast<AuthorElement>(selectedChild);
+        if (authorElem && authorElem->author) {
+            drawAuthorInfo(authorElem->author);
+        }
+    }
+}
+
 void MenuHandler::drawMenu()
 {ESP_LOGI("MenuHandler", "Draw menu called");
     Device::getInstance().clearButtonLatches();
@@ -560,6 +991,11 @@ void MenuHandler::drawMenu()
         parser = new HtmlParser(html, pageShowcase.size(), "",this->renderer,0,nullptr,rightPageFrameBuffer,Device::getInstance().reader->leftPageFrameBuffer); //dump the right page into the readers framebuffer
         parser->parse();
         delete parser;
+    }
+    else
+    {
+        renderer->framebuffer = this->rightPageFrameBuffer;
+        drawLibraryDetails();
     }
     this->renderer->drawBattery(rightPageFrameBuffer,Device::getInstance().getBatteryPercentage());
     renderer->epd.DisplayPictureBoth(leftPageFrameBuffer,rightPageFrameBuffer);

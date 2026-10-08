@@ -31,6 +31,7 @@ public:
     void drawClearScreen(bool screenID);
     void drawSquare(int startx, int starty, int lengthx, int lengthy, bool value);
     void drawPaddedBox(int startx, int starty, int lengthx, int lengthy, int padding, bool value);
+    void drawGothicBox(int x, int y, int width, int height, bool inverted);
     void drawTextBox(int y, std::string line1, bool line1Bold,bool inverted=false);
     void drawTextBox(int y, std::string line1, bool line1Bold,std::string line2, bool line2Bold,bool inverted=false);
     void drawTextBox(int y, std::string line1, bool line1Bold,std::string line2, bool line2Bold,std::string line3, bool line3Bold,bool inverted=false);

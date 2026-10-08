@@ -33,6 +33,9 @@ class MenuHandler
         
         void drawMenu();
         void drawValuePartial();
+        void drawLibraryDetails();
+        void drawBookInfo(Book *book);
+        void drawAuthorInfo(Author *author);
         bool buzzDisabled = false;
         std::function<void()> displayIdleCallbackReturn;
 
