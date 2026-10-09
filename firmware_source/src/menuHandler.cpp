@@ -11,7 +11,8 @@
 #include "tinyusb_default_config.h"
 #include <algorithm>
 #include <utility>
-#include <sys/statvfs.h>
+#include "esp_littlefs.h"
+#include "esp_vfs_fat.h"
 
 #ifndef FIRMWARE_VERSION
 #define FIRMWARE_VERSION "unknown"
@@ -937,13 +938,20 @@ void MenuHandler::drawLibraryInfo()
     // --- Disk space ---
     size_t usedBytes = 0, totalBytesFS = 0;
     bool haveSpace = false;
-    const char *mountPath = Device::getInstance().deviceSettings.storeDataOnSD ? "/sdcard" : "/littlefs";
-    struct statvfs svfs;
-    if (statvfs(mountPath, &svfs) == 0) {
-        totalBytesFS = (size_t)svfs.f_blocks * svfs.f_frsize;
-        size_t freeBytes  = (size_t)svfs.f_bfree  * svfs.f_frsize;
-        usedBytes = totalBytesFS - freeBytes;
-        haveSpace = true;
+    if (Device::getInstance().deviceSettings.storeDataOnSD) {
+        uint64_t total64 = 0, free64 = 0;
+        if (esp_vfs_fat_info("/sdcard", &total64, &free64) == ESP_OK && total64 > 0) {
+            totalBytesFS = (size_t)total64;
+            usedBytes = (size_t)(total64 - free64);
+            haveSpace = true;
+        }
+    } else {
+        size_t total = 0, used = 0;
+        if (esp_littlefs_info("bookStorage", &total, &used) == ESP_OK && total > 0) {
+            totalBytesFS = total;
+            usedBytes = used;
+            haveSpace = true;
+        }
     }
 
     // Helper: format bytes as "X.X MB" or "X KB"
