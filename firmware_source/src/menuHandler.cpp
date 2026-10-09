@@ -241,17 +241,18 @@ auto fileTransferButton = std::make_shared<ActionElement>(
     readSettingsMenu->addChild(lineSpaceBox);
     readSettingsMenu->addChild(horizontalMarginBox);
     readSettingsMenu->addChild(verticalMarginBox);
-    deviceSettingsMenu->addChild(batteryVoltageBox);
     readSettingsMenu->addChild(textBoldBox);
     readSettingsMenu->addChild(showPagePercentageBox);
     readSettingsMenu->addChild(restoreBookSettingsButton);
-    deviceSettingsMenu->addChild(buzzerBox);
-    deviceSettingsMenu->addChild(buzzerIntensityBox);
+
     deviceSettingsMenu->addChild(nightModeBox);
     deviceSettingsMenu->addChild(sunlightModeBox);
     deviceSettingsMenu->addChild(standbyTimeoutBox);
     deviceSettingsMenu->addChild(standbyScreenBox);
     deviceSettingsMenu->addChild(standbyShutdownBox);
+    deviceSettingsMenu->addChild(batteryVoltageBox);
+    deviceSettingsMenu->addChild(buzzerBox);
+    deviceSettingsMenu->addChild(buzzerIntensityBox);
     deviceSettingsMenu->addChild(storeDataOnSDBox);
 
     einkSettingsMenu->addChild(displayRefreshBox);
@@ -1300,6 +1301,138 @@ void MenuHandler::drawSettingsInfo()
     renderer->drawString(lx, 45, legend, 1, true, false, false);
 }
 
+void MenuHandler::drawDeviceSettingsSummary()
+{
+    if (!renderer) return;
+    Device &dev = Device::getInstance();
+
+    // ---- 1. Top Header Box ----
+    renderer->drawGothicBox(80, 595, 320, 38, true);
+    std::string headerText = "✦  DEVICE SETTINGS  ✦";
+    int hx = (EPD_HEIGHT - (int)headerText.length() * 8) / 2;
+    renderer->drawString(hx, 606, headerText, 1, true, false, false);
+
+    // Identify the currently focused/selected setting (if any)
+    std::shared_ptr<ValueElement> activeVal = nullptr;
+    if (currentElement) {
+        auto menu = std::static_pointer_cast<MenuElement>(currentElement);
+        if (menu && menu->selectedChildIndex < menu->children.size() &&
+            menu->children[menu->selectedChildIndex]->getType() == UIElementType::Value) {
+            activeVal = std::static_pointer_cast<ValueElement>(menu->children[menu->selectedChildIndex]);
+        }
+    }
+
+    // ---- 2. Card 1: Active Setting Focus Card ----
+    drawOrnamentalCard(renderer, 16, 455, 448, 130);
+    std::string card1Title = "✦  ACTIVE OPTION  ✦";
+    int c1x = 16 + (448 - (int)card1Title.length() * 8) / 2;
+    renderer->drawString(c1x, 556, card1Title, 1, true, false, true);
+    for (int cx = 32; cx <= 448; cx++) renderer->drawPixel(cx, 548, false);
+
+    if (activeVal) {
+        std::string curValStr = "";
+        if (activeVal->selectedValueIndex >= 0 && activeVal->selectedValueIndex < (int)activeVal->valueDescriptions.size()) {
+            curValStr = activeVal->valueDescriptions[activeVal->selectedValueIndex];
+        }
+        std::string nameLine = "Setting: " + activeVal->elementName + (curValStr.empty() ? "" : (" [" + curValStr + "]"));
+        renderer->drawString(32, 524, truncateString(nameLine, 50), 1, true, false, true);
+
+        std::string descLine = activeVal->elementDescription;
+        renderer->drawString(32, 498, truncateString(descLine, 50), 1, false, false, true);
+
+        std::string hintLine = activeVal->selected ? "Editing... Press [◀]/[▶] to change, [●] to confirm"
+                                                   : "Press [▶] or [●] to edit this setting";
+        renderer->drawString(32, 472, truncateString(hintLine, 50), 1, false, true, true);
+    } else {
+        renderer->drawString(32, 510, "Navigate left list to inspect any setting.", 1, false, false, true);
+        renderer->drawString(32, 480, "Press [▶] or [●] to edit values.", 1, false, true, true);
+    }
+
+    // ---- 3. Card 2: Complete Quick Summary of Device Settings ----
+    drawOrnamentalCard(renderer, 16, 85, 448, 360);
+    std::string card2Title = "✦  SETTINGS OVERVIEW  ✦";
+    int c2x = 16 + (448 - (int)card2Title.length() * 8) / 2;
+    renderer->drawString(c2x, 417, card2Title, 1, true, false, true);
+    for (int cx = 32; cx <= 448; cx++) renderer->drawPixel(cx, 409, false);
+
+    // Helper lambda to format each line with a cursor if it is currently selected
+    auto getRow = [&](int *settingAddr, const std::string &label, const std::string &valStr) -> std::pair<std::string, bool> {
+        bool isCurrent = (activeVal && activeVal->valueAdress == settingAddr);
+        std::string prefix = isCurrent ? "▶ " : "  ";
+        std::string line = prefix + label + " : " + valStr;
+        return { truncateString(line, 50), isCurrent };
+    };
+
+    std::string darkStr = dev.deviceSettings.nightMode ? "Enabled (Inverted)" : "Disabled";
+    std::string sunStr = dev.deviceSettings.sunlightMode ? "Enabled" : "Disabled";
+    std::string battStr = dev.deviceSettings.displayBattery ? "Shown" : "Hidden";
+    std::string timeoutStr = std::to_string(dev.deviceSettings.standbyTimeout) + " min";
+    std::string screenStr = dev.deviceSettings.standbyScreen == 0 ? "Blank" : (dev.deviceSettings.standbyScreen == 1 ? "Book Cover" : "Custom");
+
+    std::string shutdownStr = "Disabled";
+    switch (dev.deviceSettings.standbyShutdown) {
+        case 1: shutdownStr = "1 day"; break;
+        case 2: shutdownStr = "2 days"; break;
+        case 3: shutdownStr = "3 days"; break;
+        case 7: shutdownStr = "1 week"; break;
+        case 14: shutdownStr = "2 weeks"; break;
+        case 21: shutdownStr = "3 weeks"; break;
+        case 28: shutdownStr = "4 weeks"; break;
+        default: shutdownStr = dev.deviceSettings.standbyShutdown == 0 ? "Disabled" : (std::to_string(dev.deviceSettings.standbyShutdown) + " days"); break;
+    }
+
+    std::string buzzStr = dev.deviceSettings.buzzerEnabled ? ("Enabled (Level " + std::to_string(dev.deviceSettings.buzzerIntensity) + ")") : "Disabled";
+    std::string buzzIntStr = "Level " + std::to_string(dev.deviceSettings.buzzerIntensity) + " / 9";
+    std::string storeStr = dev.deviceSettings.storeDataOnSD ? "SD Card (/sdcard)" : "Internal Flash (/littlefs)";
+
+    // Section 1: Display & Theme
+    renderer->drawString(32, 386, "[ Display & Theme ]", 1, true, false, true);
+    auto r1 = getRow(&(dev.deviceSettings.nightMode), "Dark Mode        ", darkStr);
+    renderer->drawString(32, 364, r1.first, 1, r1.second, false, true);
+
+    auto r2 = getRow(&(dev.deviceSettings.sunlightMode), "Sunlight Mode    ", sunStr);
+    renderer->drawString(32, 342, r2.first, 1, r2.second, false, true);
+
+    auto r3 = getRow(&(dev.deviceSettings.displayBattery), "Battery Indicator", battStr);
+    renderer->drawString(32, 320, r3.first, 1, r3.second, false, true);
+
+    // Section 2: Power & Sleep
+    renderer->drawString(32, 292, "[ Power & Sleep ]", 1, true, false, true);
+    auto r4 = getRow(&(dev.deviceSettings.standbyTimeout), "Standby Timeout  ", timeoutStr);
+    renderer->drawString(32, 270, r4.first, 1, r4.second, false, true);
+
+    auto r5 = getRow(&(dev.deviceSettings.standbyScreen), "Standby Screen   ", screenStr);
+    renderer->drawString(32, 248, r5.first, 1, r5.second, false, true);
+
+    auto r6 = getRow(&(dev.deviceSettings.standbyShutdown), "Auto Shutdown    ", shutdownStr);
+    renderer->drawString(32, 226, r6.first, 1, r6.second, false, true);
+
+    // Section 3: Feedback & Storage
+    renderer->drawString(32, 198, "[ Hardware & Storage ]", 1, true, false, true);
+    auto r7 = getRow(&(dev.deviceSettings.buzzerEnabled), "Haptic Buzzer    ", buzzStr);
+    renderer->drawString(32, 176, r7.first, 1, r7.second, false, true);
+
+    auto r8 = getRow(&(dev.deviceSettings.buzzerIntensity), "Buzzer Intensity ", buzzIntStr);
+    renderer->drawString(32, 154, r8.first, 1, r8.second, false, true);
+
+    auto r9 = getRow(&(dev.deviceSettings.storeDataOnSD), "Data Storage     ", storeStr);
+    renderer->drawString(32, 132, r9.first, 1, r9.second, false, true);
+
+    // Thin separator before battery status
+    for (int cx = 32; cx <= 448; cx += 2) renderer->drawPixel(cx, 120, false);
+
+    char voltBuf[16];
+    snprintf(voltBuf, sizeof(voltBuf), "%.2fV", dev.getBatteryVoltage());
+    std::string battStatusLine = "Battery Level: " + std::to_string(dev.getBatteryPercentage()) + "% (" + std::string(voltBuf) + ")";
+    renderer->drawString(32, 98, truncateString(battStatusLine, 50), 1, false, false, true);
+
+    // ---- 4. Bottom Navigation Legend ----
+    renderer->drawGothicBox(16, 32, 448, 42, true);
+    std::string navLegend = "▶/● Edit Value     ▲/▼ Navigate     ◀ Back";
+    int nlx = (EPD_HEIGHT - (int)navLegend.length() * 8) / 2;
+    renderer->drawString(nlx, 45, navLegend, 1, true, false, false);
+}
+
 void MenuHandler::drawNowReadingEmpty()
 {
     if (!renderer) return;
@@ -1411,6 +1544,12 @@ void MenuHandler::drawLibraryDetails()
     // When Library (authorMenu) is highlighted on the main menu, show full library overview
     if (selectedChild == authorMenu) {
         drawLibraryInfo();
+        return;
+    }
+
+    // When inside Device Settings (or highlighting it), show quick summary of device settings
+    if (currentElement == deviceSettingsMenu || selectedChild == deviceSettingsMenu) {
+        drawDeviceSettingsSummary();
         return;
     }
 

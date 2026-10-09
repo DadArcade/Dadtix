@@ -37,6 +37,7 @@ class MenuHandler
         void drawLibraryDetails();
         void drawLibraryInfo();
         void drawSettingsInfo();
+        void drawDeviceSettingsSummary();
         void drawNowReadingEmpty();
         void drawTransferInfo();
         void drawBookInfo(Book *book, const std::string &headerText = "✦  BOOK DETAILS  ✦", const std::string &legendText = "▶ Open Book     ● Toggle Fav     ◀ Back");
