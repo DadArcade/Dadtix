@@ -164,6 +164,22 @@ MenuHandler::MenuHandler(Renderer *renderer)
     }
 );
 
+    nowReadingButton = std::make_shared<ActionElement>(
+        renderer,
+        "Now Reading",
+        "Open most recently read book",
+        [this]() {
+            Book *book = this->getNowReadingBook();
+            if (book) {
+                this->openBook(book);
+            } else {
+                Device::getInstance().notificationHandler->drawNotification("No book currently being read");
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                this->drawMenu();
+            }
+        }
+    );
+
 auto fileTransferButton = std::make_shared<ActionElement>(
     renderer,
     "Transfer files",
@@ -206,9 +222,10 @@ auto fileTransferButton = std::make_shared<ActionElement>(
         esp_restart(); //restart the device to init everything properly
     }
 );
+    this->fileTransferButton = fileTransferButton;
 
-
-    currentElement = authorMenu;
+    currentElement = mainMenu;
+    mainMenu->addChild(nowReadingButton);
     mainMenu->addChild(authorMenu);
     mainMenu->addChild(settingsMenu);
     mainMenu->addChild(fileTransferButton);
@@ -364,35 +381,9 @@ void MenuHandler::rightButtonAction()
     }
     else if(menu->children[menu->selectedChildIndex]->getType()==UIElementType::Book)
     {
-            //if(!this->buzzDisabled) Device::buzz();
             auto bookElement = std::static_pointer_cast<BookElement>(menu->children[menu->selectedChildIndex]);
             Book *book = bookElement->book;
-
-            if(book->badParse)
-            {
-                Device::getInstance().notificationHandler->drawErrorNotification(book->title);
-                vTaskDelay(500);
-                drawMenu();
-                return;
-            }
-            if(!book->matchesRenderSettings(book->getCurrentRenderSettings()))
-            {
-                Device::getInstance().notificationHandler->drawIndexingNotification(book->title,0);
-                Device::getInstance().bookHandler->reindexBook(book);
-                //book->currentPage = 0;
-            }
-            Device::getInstance().notificationHandler->drawBookOpeningNotification(book->title);
-            Reader *reader = Device::getInstance().reader;
-            reader->init(book,renderer);
-
-            
-            renderer->epd.forceRefresh();
-            Device::getInstance().state=Device::State::Reading;
-            Device::getInstance().activeBookPath = book->path;
-            Device::getInstance().activeAuthorName = menu->elementName;
-            Device::getInstance().saveAppState();
-            reader->openPage();
-            //if(!this->buzzDisabled) Device::buzz();
+            openBook(book);
     }
     else middleButtonAction();
 }
@@ -640,14 +631,107 @@ static void drawOrnamentalCard(Renderer* renderer, int x, int y, int width, int 
     }
 }
 
-void MenuHandler::drawBookInfo(Book *book)
+Book* MenuHandler::getNowReadingBook()
+{
+    Device &dev = Device::getInstance();
+    if (!dev.bookHandler) return nullptr;
+
+    // 1. Check most recently recorded book in recentBooks
+    if (!dev.recentBooks.empty()) {
+        auto it = dev.bookHandler->indexedBooks.find(dev.recentBooks[0].path);
+        if (it != dev.bookHandler->indexedBooks.end()) {
+            return it->second;
+        }
+    }
+
+    // 2. Fallback to activeBookPath if valid and not a system manual
+    if (!dev.activeBookPath.empty() &&
+        dev.activeBookPath != "userManual.epub" &&
+        dev.activeBookPath != "firmwareVersion.epub") {
+        auto it = dev.bookHandler->indexedBooks.find(dev.activeBookPath);
+        if (it != dev.bookHandler->indexedBooks.end()) {
+            return it->second;
+        }
+    }
+
+    // 3. Fallback to any book with highest lastReadCounter
+    Book *highestCounterBook = nullptr;
+    for (Book *b : dev.bookHandler->bookList) {
+        if (!b) continue;
+        if (b->lastReadCounter > 0) {
+            if (!highestCounterBook || b->lastReadCounter > highestCounterBook->lastReadCounter) {
+                highestCounterBook = b;
+            }
+        }
+    }
+    if (highestCounterBook) return highestCounterBook;
+
+    return nullptr;
+}
+
+void MenuHandler::updateNowReadingElement()
+{
+    if (!nowReadingButton) return;
+    Book *book = getNowReadingBook();
+    if (book) {
+        nowReadingButton->elementDescription = book->title;
+        if (book->totalPageCount > 0) {
+            if (!Device::getInstance().deviceSettings.showPagePercentage) {
+                int pct = (book->totalPageCount > 2) ? ((100 * book->currentPage) / (book->totalPageCount - 2)) : 100;
+                if (pct < 0) pct = 0;
+                if (pct > 100) pct = 100;
+                nowReadingButton->elementExtraDescription = std::to_string(pct) + "%";
+            } else {
+                nowReadingButton->elementExtraDescription = std::to_string(book->currentPage + 1) + "/" + std::to_string(book->totalPageCount);
+            }
+        } else {
+            nowReadingButton->elementExtraDescription = "";
+        }
+        if (book->favorite) {
+            nowReadingButton->elementExtraDescription += " ❤";
+        }
+    } else {
+        nowReadingButton->elementDescription = "Open most recently read book";
+        nowReadingButton->elementExtraDescription = "";
+    }
+}
+
+void MenuHandler::openBook(Book *book)
+{
+    if (!book) return;
+
+    if (book->badParse) {
+        Device::getInstance().notificationHandler->drawErrorNotification(book->title);
+        vTaskDelay(pdMS_TO_TICKS(500));
+        drawMenu();
+        return;
+    }
+
+    if (!book->matchesRenderSettings(book->getCurrentRenderSettings())) {
+        Device::getInstance().notificationHandler->drawIndexingNotification(book->title, 0);
+        Device::getInstance().bookHandler->reindexBook(book);
+    }
+
+    Device::getInstance().notificationHandler->drawBookOpeningNotification(book->title);
+    Reader *reader = Device::getInstance().reader;
+    reader->init(book, renderer);
+
+    renderer->epd.forceRefresh();
+    Device::getInstance().state = Device::State::Reading;
+    Device::getInstance().activeBookPath = book->path;
+    Device::getInstance().activeAuthorName = book->author;
+    Device::getInstance().recordBookOpened(book->path);
+    Device::getInstance().saveAppState();
+    reader->openPage();
+}
+
+void MenuHandler::drawBookInfo(Book *book, const std::string &headerText, const std::string &legendText)
 {
     if (!book || !renderer) return;
 
     // 1. Top Header Gothic Box
     renderer->drawGothicBox(80, 595, 320, 38, true);
-    std::string headerText = "✦  BOOK DETAILS  ✦";
-    int hx = (EPD_HEIGHT - headerText.length() * 8) / 2;
+    int hx = (EPD_HEIGHT - (int)headerText.length() * 8) / 2;
     renderer->drawString(hx, 606, headerText, 1, true, false, false);
 
     // 2. Book Title & Author Card
@@ -797,9 +881,8 @@ void MenuHandler::drawBookInfo(Book *book)
 
     // 5. Bottom Navigation Legend (Inverted Gothic Box)
     renderer->drawGothicBox(16, 32, 448, 42, true);
-    std::string legend = "▶ Open Book     ● Toggle Fav     ◀ Back";
-    int lx = (EPD_HEIGHT - legend.length() * 8) / 2;
-    renderer->drawString(lx, 45, legend, 1, true, false, false);
+    int lx = (EPD_HEIGHT - (int)legendText.length() * 8) / 2;
+    renderer->drawString(lx, 45, legendText, 1, true, false, false);
 }
 
 void MenuHandler::drawAuthorInfo(Author *author)
@@ -1165,6 +1248,63 @@ void MenuHandler::drawSettingsInfo()
     renderer->drawString(lx, 45, legend, 1, true, false, false);
 }
 
+void MenuHandler::drawNowReadingEmpty()
+{
+    if (!renderer) return;
+
+    renderer->drawGothicBox(80, 595, 320, 38, true);
+    std::string headerText = "✦  NOW READING  ✦";
+    int hx = (EPD_HEIGHT - (int)headerText.length() * 8) / 2;
+    renderer->drawString(hx, 606, headerText, 1, true, false, false);
+
+    drawOrnamentalCard(renderer, 16, 220, 448, 180);
+    std::string line1 = "✦  NO BOOK IN PROGRESS  ✦";
+    std::string line2 = "You haven't opened any book yet.";
+    std::string line3 = "Select 'Library' from the main menu";
+    std::string line4 = "to choose a book and start reading.";
+    int x1 = (EPD_HEIGHT - (int)line1.length() * 8) / 2;
+    int x2 = (EPD_HEIGHT - (int)line2.length() * 8) / 2;
+    int x3 = (EPD_HEIGHT - (int)line3.length() * 8) / 2;
+    int x4 = (EPD_HEIGHT - (int)line4.length() * 8) / 2;
+    renderer->drawString(x1, 350, line1, 1, true, false, true);
+    renderer->drawString(x2, 310, line2, 1, false, false, true);
+    renderer->drawString(x3, 280, line3, 1, false, false, true);
+    renderer->drawString(x4, 250, line4, 1, false, false, true);
+
+    renderer->drawGothicBox(16, 32, 448, 42, true);
+    std::string legend = "▶ Browse Library     ◀ Main Menu";
+    int lx = (EPD_HEIGHT - (int)legend.length() * 8) / 2;
+    renderer->drawString(lx, 45, legend, 1, true, false, false);
+}
+
+void MenuHandler::drawTransferInfo()
+{
+    if (!renderer) return;
+
+    renderer->drawGothicBox(80, 595, 320, 38, true);
+    std::string headerText = "✦  FILE TRANSFER  ✦";
+    int hx = (EPD_HEIGHT - (int)headerText.length() * 8) / 2;
+    renderer->drawString(hx, 606, headerText, 1, true, false, false);
+
+    drawOrnamentalCard(renderer, 16, 200, 448, 220);
+    std::string line1 = "✦  USB MASS STORAGE  ✦";
+    std::string line2 = "Connect your device to a computer";
+    std::string line3 = "via USB cable, then press [▶] or [●]";
+    std::string line4 = "to access the SD card storage.";
+    std::string line5 = "You can drag & drop .epub books directly.";
+    int x1 = (EPD_HEIGHT - (int)line1.length() * 8) / 2;
+    renderer->drawString(x1, 375, line1, 1, true, false, true);
+    renderer->drawString(32, 335, line2, 1, false, false, true);
+    renderer->drawString(32, 305, line3, 1, false, false, true);
+    renderer->drawString(32, 275, line4, 1, false, false, true);
+    renderer->drawString(32, 245, line5, 1, false, false, true);
+
+    renderer->drawGothicBox(16, 32, 448, 42, true);
+    std::string legend = "▶ Start USB Storage     ◀ Main Menu";
+    int lx = (EPD_HEIGHT - (int)legend.length() * 8) / 2;
+    renderer->drawString(lx, 45, legend, 1, true, false, false);
+}
+
 void MenuHandler::drawLibraryDetails()
 {
     if (!currentElement) return;
@@ -1205,6 +1345,17 @@ void MenuHandler::drawLibraryDetails()
     auto selectedChild = menu->children[menu->selectedChildIndex];
     if (!selectedChild) return;
 
+    // When Now Reading is highlighted on the main menu, show book info on the right panel
+    if (selectedChild == nowReadingButton) {
+        Book *book = getNowReadingBook();
+        if (book) {
+            drawBookInfo(book, "✦  NOW READING  ✦", "▶ Continue Reading     ◀ Main Menu");
+        } else {
+            drawNowReadingEmpty();
+        }
+        return;
+    }
+
     // When Library (authorMenu) is highlighted on the main menu, show full library overview
     if (selectedChild == authorMenu) {
         drawLibraryInfo();
@@ -1214,6 +1365,12 @@ void MenuHandler::drawLibraryDetails()
     // When Settings (settingsMenu) is highlighted, show all current settings overview
     if (selectedChild == settingsMenu || currentElement == settingsMenu) {
         drawSettingsInfo();
+        return;
+    }
+
+    // When File Transfer is highlighted on the main menu, show USB instructions
+    if (selectedChild == fileTransferButton) {
+        drawTransferInfo();
         return;
     }
 
@@ -1231,7 +1388,9 @@ void MenuHandler::drawLibraryDetails()
 }
 
 void MenuHandler::drawMenu()
-{ESP_LOGI("MenuHandler", "Draw menu called");
+{
+    ESP_LOGI("MenuHandler", "Draw menu called");
+    updateNowReadingElement();
     Device::getInstance().clearButtonLatches();
     Device::getInstance().setLatchTimeOut(200000);
     //this->displayIdleCallbackReturn = nullptr;

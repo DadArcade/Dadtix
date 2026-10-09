@@ -170,6 +170,7 @@ std::string Book::toJSON() const {
     cJSON_AddNumberToObject(root, "currentPage", currentPage);
     cJSON_AddNumberToObject(root, "badParse", badParse);
     cJSON_AddNumberToObject(root, "favorite", favorite);
+    cJSON_AddNumberToObject(root, "lastReadCounter", lastReadCounter);
 
     // chapters
     cJSON *chapters = cJSON_CreateArray();
@@ -245,6 +246,7 @@ Book *Book::fromJSON(const std::string &json) {
     cJSON *jrender = cJSON_GetObjectItem(root, "renderSettings");
     cJSON *jbadParse = cJSON_GetObjectItem(root, "badParse");
     cJSON *jfavorite = cJSON_GetObjectItem(root, "favorite");
+    cJSON *jlastRead = cJSON_GetObjectItem(root, "lastReadCounter");
     cJSON *jbookMarks = cJSON_GetObjectItem(root, "bookMarks");
     cJSON *jcachedImages = cJSON_GetObjectItem(root, "cachedImages");
 
@@ -254,6 +256,7 @@ Book *Book::fromJSON(const std::string &json) {
     book->currentPage = cJSON_IsNumber(jread) ? jread->valueint : 0;
     book->badParse = cJSON_IsNumber(jbadParse) ? jbadParse->valueint : false;
     book->favorite = cJSON_IsNumber(jfavorite) ? jfavorite->valueint : false;
+    book->lastReadCounter = cJSON_IsNumber(jlastRead) ? (uint32_t)jlastRead->valueint : 0;
 
     // chapterPageCounts
     if (jchapterPages && cJSON_IsArray(jchapterPages)) {
@@ -502,6 +505,7 @@ void BookHandler::saveBook(Book *book)
 
 void BookHandler::deleteBook(const std::string &bookPath)
 {
+    Device::getInstance().removeRecentBook(bookPath);
     bool deleteFromSD = Device::getInstance().deviceSettings.storeDataOnSD;
     const char *basePath = deleteFromSD ? "/sdcard/book_data" : "/littlefs/books";
 
@@ -814,12 +818,33 @@ for (auto it = indexedBooks.begin(); it != indexedBooks.end();) {
             }
         }
 
+        dev.removeRecentBook(it->first);
         delete it->second;
         it = indexedBooks.erase(it);
     } else {
         ++it;
     }
 }
+
+    // Sync recentBooks if empty but indexed books have lastReadCounter
+    if (dev.recentBooks.empty()) {
+        std::vector<Book*> readBooks;
+        for (const auto& pair : indexedBooks) {
+            if (pair.second && pair.second->lastReadCounter > 0) {
+                readBooks.push_back(pair.second);
+            }
+        }
+        std::sort(readBooks.begin(), readBooks.end(), [](Book* a, Book* b) {
+            return a->lastReadCounter > b->lastReadCounter;
+        });
+        for (size_t i = 0; i < readBooks.size() && i < Device::MAX_RECENT_BOOKS; ++i) {
+            dev.recentBooks.push_back({readBooks[i]->path, readBooks[i]->lastReadCounter});
+        }
+        if (!dev.recentBooks.empty() && dev.bookReadCounter < dev.recentBooks[0].counter) {
+            dev.bookReadCounter = dev.recentBooks[0].counter;
+            dev.saveAppState();
+        }
+    }
 
     // Step 4: Sort books into authorList
     for (Book* b : bookList) {

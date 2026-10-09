@@ -96,6 +96,18 @@ public:
     std::string activeAuthorName;
     int activeBookIndex = -1;
     int activeAuthorIndex = -1;
+
+    struct RecentBook {
+        std::string path;
+        uint32_t counter = 0;
+    };
+    static constexpr size_t MAX_RECENT_BOOKS = 5;
+    std::vector<RecentBook> recentBooks;
+    uint32_t bookReadCounter = 0;
+
+    void recordBookOpened(const std::string &bookPath);
+    void removeRecentBook(const std::string &bookPath);
+
     volatile int buttonStates[7] = {0};
     volatile int buttonLatchedStates[7] = {0};
 

@@ -7,6 +7,8 @@
 #include "esp_adc_cal.h"
 #include "esp_timer.h"
 #include "esp_littlefs.h"
+#include <vector>
+#include <algorithm>
 
 static const char *TAG = "DEVICE_SETTINGS";
 
@@ -437,15 +439,22 @@ void Device::saveAppState() {
     cJSON_AddStringToObject(root, "activeBookPath", Device::getInstance().activeBookPath.c_str());
     cJSON_AddStringToObject(root, "activeAuthorName", Device::getInstance().activeAuthorName.c_str());
     cJSON_AddNumberToObject(root, "state", (int) Device::getInstance().state);
+    cJSON_AddNumberToObject(root, "bookReadCounter", Device::getInstance().bookReadCounter);
+
+    cJSON *recents = cJSON_CreateArray();
+    for (const auto &item : Device::getInstance().recentBooks) {
+        cJSON *entry = cJSON_CreateObject();
+        cJSON_AddStringToObject(entry, "path", item.path.c_str());
+        cJSON_AddNumberToObject(entry, "counter", item.counter);
+        cJSON_AddItemToArray(recents, entry);
+    }
+    cJSON_AddItemToObject(root, "recentBooks", recents);
 
     char *jsonStr = cJSON_PrintUnformatted(root);
     if (jsonStr) {
         ESP_ERROR_CHECK(nvs_set_blob(nvs, "app_state", jsonStr, strlen(jsonStr)));
         cJSON_free(jsonStr);
     }
-
-
-    
 
     cJSON_Delete(root);
     nvs_commit(nvs);
@@ -470,6 +479,8 @@ void Device::loadAppState() {
             cJSON *jpath = cJSON_GetObjectItem(root, "activeBookPath");
             cJSON *jauthor = cJSON_GetObjectItem(root, "activeAuthorName");
             cJSON *jstate = cJSON_GetObjectItem(root, "state");
+            cJSON *jcounter = cJSON_GetObjectItem(root, "bookReadCounter");
+            cJSON *jrecents = cJSON_GetObjectItem(root, "recentBooks");
 
             if (cJSON_IsString(jpath)) {
                 Device::getInstance().activeBookPath = jpath->valuestring;
@@ -480,10 +491,72 @@ void Device::loadAppState() {
             if (cJSON_IsNumber(jstate)) {
                 Device::getInstance().state = (Device::State) jstate->valueint;  
             }
+            if (cJSON_IsNumber(jcounter)) {
+                Device::getInstance().bookReadCounter = (uint32_t) jcounter->valueint;
+            }
+            if (jrecents && cJSON_IsArray(jrecents)) {
+                Device::getInstance().recentBooks.clear();
+                int count = cJSON_GetArraySize(jrecents);
+                for (int i = 0; i < count && i < (int)Device::MAX_RECENT_BOOKS; i++) {
+                    cJSON *entry = cJSON_GetArrayItem(jrecents, i);
+                    if (cJSON_IsObject(entry)) {
+                        cJSON *jp = cJSON_GetObjectItem(entry, "path");
+                        cJSON *jc = cJSON_GetObjectItem(entry, "counter");
+                        if (cJSON_IsString(jp) && cJSON_IsNumber(jc)) {
+                            Device::getInstance().recentBooks.push_back({jp->valuestring, (uint32_t)jc->valueint});
+                        }
+                    }
+                }
+            }
 
             cJSON_Delete(root);
         }
     }
 
     nvs_close(nvs);
+}
+
+void Device::recordBookOpened(const std::string &bookPath) {
+    if (bookPath.empty() || bookPath == "userManual.epub" || bookPath == "firmwareVersion.epub") {
+        return;
+    }
+
+    bookReadCounter++;
+
+    for (auto it = recentBooks.begin(); it != recentBooks.end(); ++it) {
+        if (it->path == bookPath) {
+            recentBooks.erase(it);
+            break;
+        }
+    }
+
+    recentBooks.insert(recentBooks.begin(), {bookPath, bookReadCounter});
+
+    if (recentBooks.size() > MAX_RECENT_BOOKS) {
+        recentBooks.resize(MAX_RECENT_BOOKS);
+    }
+
+    if (bookHandler) {
+        auto it = bookHandler->indexedBooks.find(bookPath);
+        if (it != bookHandler->indexedBooks.end()) {
+            it->second->lastReadCounter = bookReadCounter;
+            bookHandler->saveBook(it->second);
+        }
+    }
+
+    saveAppState();
+}
+
+void Device::removeRecentBook(const std::string &bookPath) {
+    bool removed = false;
+    for (auto it = recentBooks.begin(); it != recentBooks.end(); ++it) {
+        if (it->path == bookPath) {
+            recentBooks.erase(it);
+            removed = true;
+            break;
+        }
+    }
+    if (removed) {
+        saveAppState();
+    }
 }

@@ -36,8 +36,13 @@ class MenuHandler
         void drawLibraryDetails();
         void drawLibraryInfo();
         void drawSettingsInfo();
-        void drawBookInfo(Book *book);
+        void drawNowReadingEmpty();
+        void drawTransferInfo();
+        void drawBookInfo(Book *book, const std::string &headerText = "✦  BOOK DETAILS  ✦", const std::string &legendText = "▶ Open Book     ● Toggle Fav     ◀ Back");
         void drawAuthorInfo(Author *author);
+        Book* getNowReadingBook();
+        void updateNowReadingElement();
+        void openBook(Book *book);
         bool buzzDisabled = false;
         std::function<void()> displayIdleCallbackReturn;
 
@@ -49,6 +54,8 @@ class MenuHandler
         std::shared_ptr<MenuElement> readSettingsMenu;
         std::shared_ptr<MenuElement> einkSettingsMenu;
         std::shared_ptr<MenuElement> authorMenu; 
+        std::shared_ptr<ActionElement> nowReadingButton;
+        std::shared_ptr<ActionElement> fileTransferButton;
         std::shared_ptr<ValueElement> fontSelectBox; 
         std::shared_ptr<ValueElement> fontSizeBox; 
 
