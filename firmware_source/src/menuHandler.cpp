@@ -11,6 +11,7 @@
 #include "tinyusb_default_config.h"
 #include <algorithm>
 #include <utility>
+#include <sys/statvfs.h>
 
 #ifndef FIRMWARE_VERSION
 #define FIRMWARE_VERSION "unknown"
@@ -920,6 +921,136 @@ void MenuHandler::drawAuthorInfo(Author *author)
     renderer->drawString(lx, 45, legend, 1, true, false, false);
 }
 
+void MenuHandler::drawLibraryInfo()
+{
+    BookHandler *bh = Device::getInstance().bookHandler;
+    if (!bh || !renderer) return;
+
+    // Count totals (skip index 0 which is the Favorites virtual author)
+    int totalBooks = 0;
+    int realAuthorCount = 0;
+    for (size_t i = 1; i < bh->authorList.size(); i++) {
+        realAuthorCount++;
+        totalBooks += (int)bh->authorList[i].bookList.size();
+    }
+
+    // --- Disk space ---
+    size_t usedBytes = 0, totalBytesFS = 0;
+    bool haveSpace = false;
+    const char *mountPath = Device::getInstance().deviceSettings.storeDataOnSD ? "/sdcard" : "/littlefs";
+    struct statvfs svfs;
+    if (statvfs(mountPath, &svfs) == 0) {
+        totalBytesFS = (size_t)svfs.f_blocks * svfs.f_frsize;
+        size_t freeBytes  = (size_t)svfs.f_bfree  * svfs.f_frsize;
+        usedBytes = totalBytesFS - freeBytes;
+        haveSpace = true;
+    }
+
+    // Helper: format bytes as "X.X MB" or "X KB"
+    auto fmtBytes = [](size_t b) -> std::string {
+        if (b >= 1024*1024) {
+            int mb10 = (int)((b * 10) / (1024*1024));
+            return std::to_string(mb10 / 10) + "." + std::to_string(mb10 % 10) + " MB";
+        }
+        return std::to_string(b / 1024) + " KB";
+    };
+
+    // ---- 1. Top header box ----
+    renderer->drawGothicBox(80, 595, 320, 38, true);
+    std::string headerText = "✦  LIBRARY OVERVIEW  ✦";
+    int hx = (EPD_HEIGHT - (int)headerText.length() * 8) / 2;
+    renderer->drawString(hx, 606, headerText, 1, true, false, false);
+
+    // ---- 2. Summary card ----
+    drawOrnamentalCard(renderer, 16, 490, 448, 95);
+    std::string totalStr = std::to_string(totalBooks) + (totalBooks == 1 ? " Book" : " Books");
+    totalStr += "  •  " + std::to_string(realAuthorCount) + (realAuthorCount == 1 ? " Author" : " Authors");
+    int tx = 16 + (448 - (int)totalStr.length() * 8) / 2;
+    if (tx < 30) tx = 30;
+    renderer->drawString(tx, 546, totalStr, 1, true, false, true);
+
+    std::string spaceStr;
+    if (haveSpace) {
+        spaceStr = "Used: " + fmtBytes(usedBytes) + " / " + fmtBytes(totalBytesFS);
+    } else {
+        spaceStr = "Storage: " + std::string(Device::getInstance().deviceSettings.storeDataOnSD ? "SD Card" : "Internal Flash");
+    }
+    spaceStr = truncateString(spaceStr, 40);
+    int sx = 16 + (448 - (int)spaceStr.length() * 8) / 2;
+    if (sx < 30) sx = 30;
+    renderer->drawString(sx, 514, spaceStr, 1, false, false, true);
+
+    // ---- 3. Storage bar (if we have space info) ----
+    if (haveSpace && totalBytesFS > 0) {
+        int pb_x = 32, pb_y = 498, pb_w = 416, pb_h = 10;
+        // border
+        for (int cx = pb_x; cx < pb_x + pb_w; cx++) {
+            renderer->drawPixel(cx, pb_y,          false);
+            renderer->drawPixel(cx, pb_y + pb_h - 1, false);
+        }
+        for (int cy = pb_y; cy < pb_y + pb_h; cy++) {
+            renderer->drawPixel(pb_x,          cy, false);
+            renderer->drawPixel(pb_x + pb_w - 1, cy, false);
+        }
+        int inner_w = pb_w - 4;
+        int fill_w = (int)(((long long)inner_w * (long long)usedBytes) / (long long)totalBytesFS);
+        for (int cy = pb_y + 2; cy < pb_y + pb_h - 2; cy++) {
+            for (int cx = pb_x + 2; cx < pb_x + 2 + inner_w; cx++) {
+                if (cx < pb_x + 2 + fill_w) renderer->drawPixel(cx, cy, false);
+                else renderer->drawPixel(cx, cy, true);
+            }
+        }
+    }
+
+    // ---- 4. Author list card ----
+    drawOrnamentalCard(renderer, 16, 88, 448, 388);
+    std::string listHeader = "✦  AUTHORS  ✦";
+    int lhx = 16 + (448 - (int)listHeader.length() * 8) / 2;
+    renderer->drawString(lhx, 454, listHeader, 1, true, false, true);
+    for (int cx = 32; cx <= 448; cx++) renderer->drawPixel(cx, 446, false);
+
+    if (realAuthorCount == 0) {
+        std::string e1 = "No books found in library.";
+        std::string e2 = "Add .epub files to SD card or";
+        std::string e3 = "use Transfer Files mode.";
+        renderer->drawString(32, 380, e1, 1, false, false, true);
+        renderer->drawString(32, 352, e2, 1, false, false, true);
+        renderer->drawString(32, 324, e3, 1, false, false, true);
+    } else {
+        // Show up to 10 authors; each row is 32px tall
+        int maxShow = std::min(realAuthorCount, 10);
+        for (int i = 0; i < maxShow; i++) {
+            Author &a = bh->authorList[i + 1]; // skip favorites at index 0
+            int y_row = 422 - i * 32;
+
+            std::string nameStr = std::to_string(i + 1) + ". " + a.name;
+            nameStr = truncateString(nameStr, 28);
+            renderer->drawString(32, y_row, nameStr, 1, true, false, true);
+
+            std::string cntStr = std::to_string(a.bookList.size()) + (a.bookList.size() == 1 ? " bk" : " bks");
+            // right-align count inside card
+            int cx_cnt = 448 - (int)cntStr.length() * 8;
+            if (cx_cnt < 240) cx_cnt = 240;
+            renderer->drawString(cx_cnt, y_row, cntStr, 1, false, false, true);
+
+            // thin separator line
+            if (i < maxShow - 1) {
+                for (int cx = 32; cx <= 448; cx += 2) renderer->drawPixel(cx, y_row - 8, false);
+            }
+        }
+        if (realAuthorCount > 10) {
+            std::string moreStr = "  + " + std::to_string(realAuthorCount - 10) + " more author(s)";
+            renderer->drawString(32, 98, moreStr, 1, false, false, true);
+        }
+    }
+
+    // ---- 5. Bottom navigation legend ----
+    renderer->drawGothicBox(16, 32, 448, 42, true);
+    std::string legend = "▶ Browse Library     ◀ Main Menu";
+    int lx = (EPD_HEIGHT - (int)legend.length() * 8) / 2;
+    renderer->drawString(lx, 45, legend, 1, true, false, false);
+}
+
 void MenuHandler::drawLibraryDetails()
 {
     if (!currentElement) return;
@@ -959,6 +1090,12 @@ void MenuHandler::drawLibraryDetails()
 
     auto selectedChild = menu->children[menu->selectedChildIndex];
     if (!selectedChild) return;
+
+    // When Library (authorMenu) is highlighted on the main menu, show full library overview
+    if (selectedChild == authorMenu) {
+        drawLibraryInfo();
+        return;
+    }
 
     if (selectedChild->getType() == UIElementType::Book) {
         auto bookElem = std::static_pointer_cast<BookElement>(selectedChild);

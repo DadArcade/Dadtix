@@ -34,6 +34,7 @@ class MenuHandler
         void drawMenu();
         void drawValuePartial();
         void drawLibraryDetails();
+        void drawLibraryInfo();
         void drawBookInfo(Book *book);
         void drawAuthorInfo(Author *author);
         bool buzzDisabled = false;
