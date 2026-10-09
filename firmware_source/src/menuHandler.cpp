@@ -21,6 +21,7 @@
 PageShowcase pageShowcase;
 
 MenuHandler::MenuHandler(Renderer *renderer)
+    : recentBooksAuthor("Recently Read")
 {
     this->renderer = renderer;
     this->leftPageFrameBuffer = (unsigned char*)calloc(EPD_WIDTH * EPD_HEIGHT / 8,sizeof(unsigned char));
@@ -258,6 +259,8 @@ auto fileTransferButton = std::make_shared<ActionElement>(
     einkSettingsMenu->addChild(sunlightFullRefreshBox);
     einkSettingsMenu->addChild(vcomLeftBox);
     einkSettingsMenu->addChild(vcomRightBox);
+    // The recently-read element is added to authorMenu during layoutReadMenu(),
+    // once recentBooks data is available.
     //drawMenu();
 }
 
@@ -426,11 +429,41 @@ void MenuHandler::leftButtonAction()
             //if(!this->buzzDisabled) Device::buzz();
             this->currentElement = parent;
             Device::getInstance().bookHandler->refreshFavorites();
+            refreshRecentBooksElement();
             renderer->epd.forceRefresh();
             drawMenu();
             //if(!this->buzzDisabled) Device::buzz();
         }
     }
+}
+
+void MenuHandler::refreshRecentBooksElement()
+{
+    // Rebuild the recently-read book list from Device::recentBooks (sorted newest-first)
+    recentBooksAuthor.bookList.clear();
+    Device &dev = Device::getInstance();
+    if (dev.bookHandler) {
+        size_t limit = std::min(dev.recentBooks.size(), Device::MAX_RECENT_BOOKS);
+        for (size_t i = 0; i < limit; i++) {
+            auto it = dev.bookHandler->indexedBooks.find(dev.recentBooks[i].path);
+            if (it != dev.bookHandler->indexedBooks.end() && it->second) {
+                recentBooksAuthor.bookList.push_back(it->second);
+            }
+        }
+    }
+
+    if (!recentBooksElement) {
+        // First call: create and insert after the Favorites element (children[0])
+        recentBooksElement = std::make_shared<AuthorElement>(renderer, &recentBooksAuthor);
+        recentBooksElement->initChildren();
+        // Insert at position 1 (right after Favorites at position 0)
+        recentBooksElement->setParent(authorMenu);
+        authorMenu->children.insert(authorMenu->children.begin() + 1, recentBooksElement);
+    } else {
+        // Subsequent calls: refresh the element description and children
+        recentBooksElement->initChildren();
+    }
+    recentBooksElement->elementDescription = "Books: " + std::to_string(recentBooksAuthor.bookList.size());
 }
 
 void MenuHandler::layoutReadMenu(std::vector<Author>& authorList)
@@ -442,6 +475,9 @@ void MenuHandler::layoutReadMenu(std::vector<Author>& authorList)
         authorElement->initChildren();
         this->authorMenu->addChild(authorElement);
     }
+    // Reset the recently-read element pointer so it is rebuilt freshly after the clear
+    recentBooksElement = nullptr;
+    refreshRecentBooksElement();
     for(int i=0;i<readSettingsMenu->children.size();i++) //and update the values in the settings
     {
         if(readSettingsMenu->children[i]->getType()==UIElementType::Value)
@@ -889,17 +925,22 @@ void MenuHandler::drawAuthorInfo(Author *author)
 {
     if (!author || !renderer) return;
 
-    bool isFavorites = (author->name == "Favorite books");
+    bool isFavorites   = (author->name == "Favorite books");
+    bool isRecentRead  = (author->name == "Recently Read");
 
     // 1. Top Header Gothic Box
     renderer->drawGothicBox(80, 595, 320, 38, true);
-    std::string headerText = isFavorites ? "✦  FAVORITE BOOKS  ✦" : "✦  AUTHOR OVERVIEW  ✦";
+    std::string headerText = isFavorites  ? "✦  FAVORITE BOOKS  ✦"
+                           : isRecentRead ? "✦  RECENTLY READ  ✦"
+                           : "✦  AUTHOR OVERVIEW  ✦";
     int hx = (EPD_HEIGHT - headerText.length() * 8) / 2;
     renderer->drawString(hx, 606, headerText, 1, true, false, false);
 
     // 2. Author Name Card
     drawOrnamentalCard(renderer, 16, 490, 448, 95);
-    std::string authorDisplayName = isFavorites ? "Favorite Collection ❤" : author->name;
+    std::string authorDisplayName = isFavorites  ? "Favorite Collection ❤"
+                                  : isRecentRead ? "Recently Read ✦"
+                                  : author->name;
     authorDisplayName = truncateString(authorDisplayName, 34);
     int ax = 16 + (448 - authorDisplayName.length() * 8) / 2;
     if (ax < 30) ax = 30;
@@ -912,7 +953,9 @@ void MenuHandler::drawAuthorInfo(Author *author)
 
     // 3. Collection Statistics Card
     drawOrnamentalCard(renderer, 16, 360, 448, 118);
-    std::string statsHeader = "✦  COLLECTION STATISTICS  ✦";
+    std::string statsHeader = isFavorites  ? "✦  COLLECTION STATISTICS  ✦"
+                            : isRecentRead ? "✦  READING HISTORY  ✦"
+                            : "✦  COLLECTION STATISTICS  ✦";
     int shx = 16 + (448 - statsHeader.length() * 8) / 2;
     renderer->drawString(shx, 454, statsHeader, 1, true, false, true);
     for (int cx = 32; cx <= 448; cx++) {
@@ -946,7 +989,9 @@ void MenuHandler::drawAuthorInfo(Author *author)
 
     // 4. Books in Collection Card
     drawOrnamentalCard(renderer, 16, 88, 448, 260);
-    std::string booksHeader = isFavorites ? "✦  FAVORITE TITLES  ✦" : "✦  BOOKS IN COLLECTION  ✦";
+    std::string booksHeader = isFavorites  ? "✦  FAVORITE TITLES  ✦"
+                            : isRecentRead ? "✦  RECENTLY READ TITLES  ✦"
+                            : "✦  BOOKS IN COLLECTION  ✦";
     int bhx = 16 + (448 - booksHeader.length() * 8) / 2;
     renderer->drawString(bhx, 324, booksHeader, 1, true, false, true);
     for (int cx = 32; cx <= 448; cx++) {
@@ -954,9 +999,15 @@ void MenuHandler::drawAuthorInfo(Author *author)
     }
 
     if (author->bookList.empty()) {
-        std::string empty1 = isFavorites ? "No favorite books added yet." : "No books found for this author.";
-        std::string empty2 = isFavorites ? "While browsing any book, press [●]" : "Add EPUB books to SD card to populate.";
-        std::string empty3 = isFavorites ? "to mark it as a favorite." : "";
+        std::string empty1 = isFavorites  ? "No favorite books added yet."
+                           : isRecentRead ? "No recently read books yet."
+                           : "No books found for this author.";
+        std::string empty2 = isFavorites  ? "While browsing any book, press [●]"
+                           : isRecentRead ? "Open a book from the Library to"
+                           : "Add EPUB books to SD card to populate.";
+        std::string empty3 = isFavorites  ? "to mark it as a favorite."
+                           : isRecentRead ? "have it appear here."
+                           : "";
         renderer->drawString(32, 260, empty1, 1, false, false, true);
         renderer->drawString(32, 230, empty2, 1, false, false, true);
         if (!empty3.empty()) renderer->drawString(32, 204, empty3, 1, false, false, true);
@@ -968,7 +1019,8 @@ void MenuHandler::drawAuthorInfo(Author *author)
             int y_top = 286 - i * 46;
 
             std::string titleDisplay = std::to_string(i + 1) + ". " + b->title;
-            if (b->favorite && !isFavorites) titleDisplay += " ❤";
+            if (b->favorite && !isFavorites && !isRecentRead) titleDisplay += " ❤";
+            if (b->favorite && isRecentRead) titleDisplay += " ❤";
             titleDisplay = truncateString(titleDisplay, 46);
             renderer->drawString(32, y_top, titleDisplay, 1, true, false, true);
 
@@ -985,7 +1037,7 @@ void MenuHandler::drawAuthorInfo(Author *author)
             } else {
                 bookProg = "Unread (" + std::to_string(b->totalPageCount) + " pages)";
             }
-            if (isFavorites && !b->author.empty()) {
+            if ((isFavorites || isRecentRead) && !b->author.empty()) {
                 bookProg += " • by " + b->author;
             }
             bookProg = "   " + truncateString(bookProg, 46);
@@ -1010,10 +1062,10 @@ void MenuHandler::drawLibraryInfo()
     BookHandler *bh = Device::getInstance().bookHandler;
     if (!bh || !renderer) return;
 
-    // Count totals (skip index 0 which is the Favorites virtual author)
+    // Count totals — skip index 0 (Favorites) and index 1 (Recently Read), both virtual authors
     int totalBooks = 0;
     int realAuthorCount = 0;
-    for (size_t i = 1; i < bh->authorList.size(); i++) {
+    for (size_t i = 2; i < bh->authorList.size(); i++) {
         realAuthorCount++;
         totalBooks += (int)bh->authorList[i].bookList.size();
     }
