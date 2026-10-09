@@ -113,18 +113,14 @@ bool HtmlParser::VisitEnter(const tinyxml2::XMLElement &element, const tinyxml2:
         ESP_LOGI(TAG, "loading image: %s", src);
         Image image = Image(imagePath,epub->get_path());
         bool drawPage = (this->currentPage==this->targetPage || this->currentPage==this->targetPage+1);
-        if(!drawPage)
+        for(size_t i=0;i<cachedImages.size();i++)
         {
-          for(size_t i=0;i<cachedImages.size();i++)
+          if(cachedImages[i].filePath==imagePath)
           {
-            if(cachedImages[i].filePath==imagePath)
-            {
-              ESP_LOGI(TAG, "loaded image dimensions from cache");
-              image.cached=true;
-              image.imageHeight = cachedImages[i].height;
-              image.imageWidth = cachedImages[i].width;
-              break;
-            }
+            image.cached=true;
+            image.imageHeight = cachedImages[i].height;
+            image.imageWidth = cachedImages[i].width;
+            break;
           }
         }
 
@@ -184,6 +180,16 @@ bool HtmlParser::VisitEnter(const tinyxml2::XMLElement &element, const tinyxml2:
         Image image = Image(imagePath,epub->get_path());
         bool drawPage = (this->currentPage==this->targetPage || this->currentPage==this->targetPage+1);
         if(drawPage) imagePresentOnPage=true;
+        for(size_t i=0;i<cachedImages.size();i++)
+        {
+          if(cachedImages[i].filePath==imagePath)
+          {
+            image.cached=true;
+            image.imageHeight = cachedImages[i].height;
+            image.imageWidth = cachedImages[i].width;
+            break;
+          }
+        }
 
         this->styleHierarchy.emplace_back(this->styleHierarchy.back());
         const char *styleClass = element.Attribute("class");
@@ -381,10 +387,10 @@ bool HtmlParser::Visit(const tinyxml2::XMLText &text)
   if(this->currentPage<this->targetPage || this->indexingMode) currentElementIndex++;
 
 
-  std::vector<int> intArray = decodeHtmlEntities(utf8ToCodePoints(textValue));
+  parsedCodePoints = decodeHtmlEntities(utf8ToCodePoints(textValue));
   
   bool drawPage = (this->currentPage==this->targetPage || this->currentPage==this->targetPage+1);
-  this->contentParser->parseTextBlock(intArray,this->isNewLine,styleHierarchy.back(),drawPage);
+  this->contentParser->parseTextBlock(parsedCodePoints,this->isNewLine,styleHierarchy.back(),drawPage);
   
   this->isNewLine = false;
   if(contentParser->textOverflowBuffer.size()) 

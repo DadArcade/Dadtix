@@ -55,4 +55,5 @@ public:
     std::vector<Book::BookMark> bookMarks; //list of bookmarks for bookmark retention
     std::vector<Style> styleHierarchy; //the hierarchical list of styles
     std::vector<Book::cachedImage> cachedImages;
+    std::vector<int> parsedCodePoints;
 };

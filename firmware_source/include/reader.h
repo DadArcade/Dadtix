@@ -32,6 +32,9 @@ public:
     int renderPages(unsigned char* leftPageFrameBuffer,unsigned char* rightPageFrameBuffer,int pageCacheIndex);
     std::string currentBookPath;
     std::string currentChapterPath;
+    std::string cachedChapterPath;
+    std::vector<char> cachedChapterHtml;
+    void clearChapterCache();
     State state = State::Reading;
 
     std::vector <int> pageChapterIndex {0,0,0};

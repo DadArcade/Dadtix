@@ -30,9 +30,17 @@ Reader::~Reader()
     free(rightPageFrameBuffer);
     free(rightPageFrameBufferNext);
     free(rightPageFrameBufferPrevious);
+    clearChapterCache();
     if (epub) {
     delete epub;
     }
+}
+
+void Reader::clearChapterCache()
+{
+    cachedChapterPath.clear();
+    cachedChapterHtml.clear();
+    cachedChapterHtml.shrink_to_fit();
 }
 
 inline uint8_t pop8(uint8_t v) {
@@ -58,6 +66,7 @@ void Reader::init(Book *book,Renderer* renderer)
     this->currentBookPath = book->path;
     this->currentChapter = 0;
 
+    clearChapterCache();
     this->epub = new Epub(std::string("/sdcard/") + this->currentBookPath);
     ESP_LOGI(TAG, "book path: %s", this->currentBookPath.c_str());
     if (epub->load())
@@ -125,9 +134,28 @@ int Reader::renderPages(unsigned char* leftPageFrameBuffer,unsigned char* rightP
     int currentPageInChapter = getCurrentPageInChapter(book->currentPage);
     std::string currentChapterPath = epub->get_spine_item(this->currentChapter);
     ESP_LOGI(TAG, "render Chapter: %s", currentChapterPath.c_str());
-    char *html = reinterpret_cast<char *>(this->epub->get_item_contents(currentChapterPath));
-    if(html)
+
+    if (currentChapterPath != cachedChapterPath || cachedChapterHtml.empty())
     {
+        size_t htmlSize = 0;
+        uint8_t *rawHtml = epub->get_item_contents(currentChapterPath, &htmlSize);
+        if (rawHtml)
+        {
+            cachedChapterHtml.assign(reinterpret_cast<char*>(rawHtml), reinterpret_cast<char*>(rawHtml) + htmlSize);
+            cachedChapterHtml.push_back('\0');
+            cachedChapterPath = currentChapterPath;
+            free(rawHtml);
+            ESP_LOGI(TAG, "Cached chapter %s (%zu bytes)", cachedChapterPath.c_str(), htmlSize);
+        }
+        else
+        {
+            clearChapterCache();
+        }
+    }
+
+    if (!cachedChapterHtml.empty())
+    {
+        char *html = cachedChapterHtml.data();
         renderer->clearScreenBuffer(leftPageFrameBuffer);
         renderer->clearScreenBuffer(rightPageFrameBuffer);
         HtmlParser *parser = nullptr;
@@ -138,7 +166,6 @@ int Reader::renderPages(unsigned char* leftPageFrameBuffer,unsigned char* rightP
         pageChapterIndex[pageCacheIndex] = currentChapter;
         pageImagePresent[pageCacheIndex] = parser->imagePresentOnPage;
 
-        free(html);
         delete parser;
         this->renderer->drawPageOverlay(leftPageFrameBuffer,book->currentPage+1,book->totalPageCount);
         this->renderer->drawPageOverlay(rightPageFrameBuffer,book->currentPage+2,book->totalPageCount);
@@ -246,10 +273,16 @@ void Reader::nextPage()
         leftPageFrameBufferNext,
         rightPageFrameBufferNext,
         [this]() {
-            memcpy(leftPageFrameBufferPrevious, leftPageFrameBuffer, EPD_WIDTH * EPD_HEIGHT / 8);
-            memcpy(rightPageFrameBufferPrevious, rightPageFrameBuffer, EPD_WIDTH * EPD_HEIGHT / 8);
-            memcpy(leftPageFrameBuffer, leftPageFrameBufferNext, EPD_WIDTH * EPD_HEIGHT / 8);
-            memcpy(rightPageFrameBuffer, rightPageFrameBufferNext, EPD_WIDTH * EPD_HEIGHT / 8);
+            unsigned char* tempLeft = leftPageFrameBufferPrevious;
+            leftPageFrameBufferPrevious = leftPageFrameBuffer;
+            leftPageFrameBuffer = leftPageFrameBufferNext;
+            leftPageFrameBufferNext = tempLeft;
+
+            unsigned char* tempRight = rightPageFrameBufferPrevious;
+            rightPageFrameBufferPrevious = rightPageFrameBuffer;
+            rightPageFrameBuffer = rightPageFrameBufferNext;
+            rightPageFrameBufferNext = tempRight;
+
             book->currentPage += 2;
             renderPages(leftPageFrameBufferNext, rightPageFrameBufferNext,2);
             book->currentPage -= 2;
@@ -306,10 +339,16 @@ void Reader::prevPage()
             leftPageFrameBufferPrevious,
             rightPageFrameBufferPrevious,
             [this]() {
-                memcpy(leftPageFrameBufferNext, leftPageFrameBuffer, EPD_WIDTH * EPD_HEIGHT / 8);
-                memcpy(rightPageFrameBufferNext, rightPageFrameBuffer, EPD_WIDTH * EPD_HEIGHT / 8);
-                memcpy(leftPageFrameBuffer, leftPageFrameBufferPrevious, EPD_WIDTH * EPD_HEIGHT / 8);
-                memcpy(rightPageFrameBuffer, rightPageFrameBufferPrevious, EPD_WIDTH * EPD_HEIGHT / 8);
+                unsigned char* tempLeft = leftPageFrameBufferNext;
+                leftPageFrameBufferNext = leftPageFrameBuffer;
+                leftPageFrameBuffer = leftPageFrameBufferPrevious;
+                leftPageFrameBufferPrevious = tempLeft;
+
+                unsigned char* tempRight = rightPageFrameBufferNext;
+                rightPageFrameBufferNext = rightPageFrameBuffer;
+                rightPageFrameBuffer = rightPageFrameBufferPrevious;
+                rightPageFrameBufferPrevious = tempRight;
+
                 if(book->currentPage>=2)
                 {
                     book->currentPage -= 2;
@@ -377,6 +416,7 @@ void Reader::indexPages(void)
             delete parser;
         } 
     }
+    clearChapterCache();
 }
 
 void Reader::addBookMark()

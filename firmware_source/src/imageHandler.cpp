@@ -118,7 +118,9 @@ struct JpegContext {
 
 Image::Image(std::string imagePath, std::string basePath)
 : imagePath(std::move(imagePath)), basePath(std::move(basePath))
-{}
+{
+    format = detectFormat(this->imagePath);
+}
 
 unsigned int Image::in_func(JDEC* jd, uint8_t* buf, unsigned int len) {
     auto* wrapper = static_cast<JpegContext*>(jd->device);
