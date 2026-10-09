@@ -35,13 +35,13 @@ public:
     };
 
     struct DeviceSettings {
-        int displayRefresh = 5;
+        int displayRefresh = 15;
         int buzzerEnabled = 0;
         int buzzerIntensity = 5;
         int nightMode = 0;
         int displayBattery = 1;
         int standbyTimeout = 10;
-        int standbyScreen = 1;
+        int standbyScreen = 2;
         int sunlightMode = 0;
         int showPagePercentage = 0;
         int storeDataOnSD = 1;

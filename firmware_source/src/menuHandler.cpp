@@ -53,7 +53,7 @@ MenuHandler::MenuHandler(Renderer *renderer)
     std::vector<int> {1,0}, std::vector<std::string> {std::string("Percentage"),std::string("Number")},&(Device::getInstance().deviceSettings.showPagePercentage));
 
     auto displayRefreshBox = std::make_shared<ValueElement>(renderer, std::string("Full refresh interval"),std::string("Fully refresh displays after x pages"),
-    std::vector<int> {0,1,2,3,4,5}, std::vector<std::string> {std::string("0"),std::string("1"),std::string("2"),std::string("3"),std::string("4"),std::string("5")},&(Device::getInstance().deviceSettings.displayRefresh));
+    std::vector<int> {0,1,2,3,4,5,10,15,20}, std::vector<std::string> {std::string("0"),std::string("1"),std::string("2"),std::string("3"),std::string("4"),std::string("5"),std::string("10"),std::string("15"),std::string("20")},&(Device::getInstance().deviceSettings.displayRefresh));
 
     auto buzzerBox = std::make_shared<ValueElement>(renderer, std::string("Haptic buzzer"),std::string("Enable or disable buzzer"),
     std::vector<int> {1,0}, std::vector<std::string> {std::string("Enable"),std::string("Disable")},&(Device::getInstance().deviceSettings.buzzerEnabled));
