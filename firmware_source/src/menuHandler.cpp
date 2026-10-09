@@ -1059,6 +1059,112 @@ void MenuHandler::drawLibraryInfo()
     renderer->drawString(lx, 45, legend, 1, true, false, false);
 }
 
+void MenuHandler::drawSettingsInfo()
+{
+    if (!renderer) return;
+    Device &dev = Device::getInstance();
+
+    // ---- 1. Top Header Box ----
+    renderer->drawGothicBox(80, 595, 320, 38, true);
+    std::string headerText = "✦  DEVICE SETTINGS  ✦";
+    int hx = (EPD_HEIGHT - (int)headerText.length() * 8) / 2;
+    renderer->drawString(hx, 606, headerText, 1, true, false, false);
+
+    // ---- 2. Card 1: Reading Experience ----
+    drawOrnamentalCard(renderer, 16, 435, 448, 150);
+    std::string card1Title = "✦  READING & TYPOGRAPHY  ✦";
+    int c1x = 16 + (448 - (int)card1Title.length() * 8) / 2;
+    renderer->drawString(c1x, 556, card1Title, 1, true, false, true);
+    for (int cx = 32; cx <= 448; cx++) renderer->drawPixel(cx, 548, false);
+
+    std::string fontName = "System Default";
+    int fFam = dev.renderSettings.fontFamily;
+    if (renderer && fFam >= 0 && fFam < (int)renderer->fontHandler.families.size()) {
+        fontName = renderer->fontHandler.families[fFam].name;
+    }
+    std::string fontLine = "Font: " + fontName + " • " + std::to_string(dev.renderSettings.fontPoints) + " px (" +
+                           (dev.renderSettings.fontBold ? "Bold" : "Auto") + ")";
+    renderer->drawString(32, 524, truncateString(fontLine, 50), 1, false, false, true);
+
+    std::string marginLine = "Margins: Horiz " + std::to_string(dev.renderSettings.marginsHorizontal) + " em • Vert " +
+                             std::to_string(dev.renderSettings.marginsVertical) + " em";
+    renderer->drawString(32, 500, truncateString(marginLine, 50), 1, false, false, true);
+
+    std::string spacingLine = "Line Spacing: " + std::to_string(dev.renderSettings.lineSpacing) + " px • Progress: " +
+                              (dev.deviceSettings.showPagePercentage ? "Percentage" : "Page Count");
+    renderer->drawString(32, 476, truncateString(spacingLine, 50), 1, false, false, true);
+
+    std::string storageLine = "Data Storage: " + std::string(dev.deviceSettings.storeDataOnSD ? "SD Card (/sdcard)" : "Internal Flash (/littlefs)");
+    renderer->drawString(32, 452, truncateString(storageLine, 50), 1, false, false, true);
+
+    // ---- 3. Card 2: Device Behaviour ----
+    drawOrnamentalCard(renderer, 16, 260, 448, 160);
+    std::string card2Title = "✦  DEVICE & POWER  ✦";
+    int c2x = 16 + (448 - (int)card2Title.length() * 8) / 2;
+    renderer->drawString(c2x, 392, card2Title, 1, true, false, true);
+    for (int cx = 32; cx <= 448; cx++) renderer->drawPixel(cx, 384, false);
+
+    std::string modeLine = "Dark Mode: " + std::string(dev.deviceSettings.nightMode ? "Enabled" : "Disabled") +
+                           " • Sunlight: " + std::string(dev.deviceSettings.sunlightMode ? "Enabled" : "Disabled");
+    renderer->drawString(32, 360, truncateString(modeLine, 50), 1, false, false, true);
+
+    std::string hapticLine = "Haptic Buzzer: " + std::string(dev.deviceSettings.buzzerEnabled ? ("Enabled (Level " + std::to_string(dev.deviceSettings.buzzerIntensity) + ")") : "Disabled") +
+                             " • Battery: " + std::string(dev.deviceSettings.displayBattery ? "Shown" : "Hidden");
+    renderer->drawString(32, 336, truncateString(hapticLine, 50), 1, false, false, true);
+
+    std::string screenType = dev.deviceSettings.standbyScreen == 0 ? "Blank" : (dev.deviceSettings.standbyScreen == 1 ? "Book Cover" : "Custom");
+    std::string sleepLine = "Standby Timeout: " + std::to_string(dev.deviceSettings.standbyTimeout) + " min • Screen: " + screenType;
+    renderer->drawString(32, 312, truncateString(sleepLine, 50), 1, false, false, true);
+
+    std::string shutdownStr = "Disabled";
+    switch (dev.deviceSettings.standbyShutdown) {
+        case 1: shutdownStr = "1 day"; break;
+        case 2: shutdownStr = "2 days"; break;
+        case 3: shutdownStr = "3 days"; break;
+        case 7: shutdownStr = "1 week"; break;
+        case 14: shutdownStr = "2 weeks"; break;
+        case 21: shutdownStr = "3 weeks"; break;
+        case 28: shutdownStr = "4 weeks"; break;
+        default: shutdownStr = dev.deviceSettings.standbyShutdown == 0 ? "Disabled" : (std::to_string(dev.deviceSettings.standbyShutdown) + " days"); break;
+    }
+    std::string powerLine = "Auto Shutdown: " + shutdownStr;
+    renderer->drawString(32, 288, truncateString(powerLine, 50), 1, false, false, true);
+
+    // ---- 4. Card 3: E-Ink Display & System ----
+    drawOrnamentalCard(renderer, 16, 85, 448, 160);
+    std::string card3Title = "✦  E-INK & SYSTEM  ✦";
+    int c3x = 16 + (448 - (int)card3Title.length() * 8) / 2;
+    renderer->drawString(c3x, 217, card3Title, 1, true, false, true);
+    for (int cx = 32; cx <= 448; cx++) renderer->drawPixel(cx, 209, false);
+
+    std::string refreshLine = "Full Refresh: " + std::string(dev.deviceSettings.displayRefresh == 0 ? "Disabled" : ("Every " + std::to_string(dev.deviceSettings.displayRefresh) + " pages"));
+    renderer->drawString(32, 185, truncateString(refreshLine, 50), 1, false, false, true);
+
+    std::string imageLine = "Smart Image: " + std::string(dev.deviceSettings.smartImageDetect ? "Enabled" : "Disabled") +
+                            " • Sunlight Refresh: " + std::string(dev.deviceSettings.sunlightFullRefresh ? "Enabled" : "Disabled");
+    renderer->drawString(32, 161, truncateString(imageLine, 50), 1, false, false, true);
+
+    auto formatVcom = [](int val) -> std::string {
+        if (val < 0 || val >= 80) return std::to_string(val);
+        std::string s = std::to_string(10000 + val * 5 + 10) + "V";
+        s[0] = '-';
+        s[1] = s[2];
+        s[2] = '.';
+        return s;
+    };
+    std::string vcomLine = "Vcom: Left " + formatVcom(dev.deviceSettings.vcomLeft) + " / Right " + formatVcom(dev.deviceSettings.vcomRight);
+    renderer->drawString(32, 137, truncateString(vcomLine, 50), 1, false, false, true);
+
+    std::string fwLine = "Firmware Version: " FIRMWARE_VERSION;
+    renderer->drawString(32, 113, truncateString(fwLine, 50), 1, false, false, true);
+
+    // ---- 5. Bottom Navigation Legend ----
+    renderer->drawGothicBox(16, 32, 448, 42, true);
+    std::string legend = "▶ Open Settings     ◀ Main Menu";
+    int lx = (EPD_HEIGHT - (int)legend.length() * 8) / 2;
+    renderer->drawString(lx, 45, legend, 1, true, false, false);
+}
+
 void MenuHandler::drawLibraryDetails()
 {
     if (!currentElement) return;
@@ -1102,6 +1208,12 @@ void MenuHandler::drawLibraryDetails()
     // When Library (authorMenu) is highlighted on the main menu, show full library overview
     if (selectedChild == authorMenu) {
         drawLibraryInfo();
+        return;
+    }
+
+    // When Settings (settingsMenu) is highlighted, show all current settings overview
+    if (selectedChild == settingsMenu || currentElement == settingsMenu) {
+        drawSettingsInfo();
         return;
     }
 
