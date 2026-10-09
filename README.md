@@ -22,7 +22,6 @@ To enter flash mode on your device, make sure it is fully turned off for at leas
 From there, you can flash the firmware binary with your preferred ESP32 flasher (such as https://www.espboards.dev/tools/program/), in a browser that supports WebSerial (Chrome, Edge, Opera)
 
 
-
 ## Patching
 To patch the firmware without resetting all settings upload the diptyx_firmware **patch** file, select address **0x10000**, and proceed to flash the device.
 
