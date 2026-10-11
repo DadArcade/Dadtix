@@ -1071,24 +1071,38 @@ void MenuHandler::drawLibraryInfo()
         totalBooks += (int)bh->authorList[i].bookList.size();
     }
 
-    // --- Disk space ---
-    size_t usedBytes = 0, totalBytesFS = 0;
-    bool haveSpace = false;
-    if (Device::getInstance().deviceSettings.storeDataOnSD) {
-        uint64_t total64 = 0, free64 = 0;
-        if (esp_vfs_fat_info("/sdcard", &total64, &free64) == ESP_OK && total64 > 0) {
-            totalBytesFS = (size_t)total64;
-            usedBytes = (size_t)(total64 - free64);
-            haveSpace = true;
+    // --- Disk space (cached to avoid synchronous SD/LittleFS scans on every menu highlight) ---
+    static size_t cachedUsedBytes = 0, cachedTotalBytesFS = 0;
+    static bool cachedHaveSpace = false, spaceInitialized = false;
+    static int cachedStoreOnSD = -1, cachedBookCount = -1;
+
+    int storeOnSD = Device::getInstance().deviceSettings.storeDataOnSD;
+    if (!spaceInitialized || storeOnSD != cachedStoreOnSD || totalBooks != cachedBookCount) {
+        cachedUsedBytes = 0;
+        cachedTotalBytesFS = 0;
+        cachedHaveSpace = false;
+        if (storeOnSD) {
+            uint64_t total64 = 0, free64 = 0;
+            if (esp_vfs_fat_info("/sdcard", &total64, &free64) == ESP_OK && total64 > 0) {
+                cachedTotalBytesFS = (size_t)total64;
+                cachedUsedBytes = (size_t)(total64 - free64);
+                cachedHaveSpace = true;
+            }
+        } else {
+            size_t total = 0, used = 0;
+            if (esp_littlefs_info("bookStorage", &total, &used) == ESP_OK && total > 0) {
+                cachedTotalBytesFS = total;
+                cachedUsedBytes = used;
+                cachedHaveSpace = true;
+            }
         }
-    } else {
-        size_t total = 0, used = 0;
-        if (esp_littlefs_info("bookStorage", &total, &used) == ESP_OK && total > 0) {
-            totalBytesFS = total;
-            usedBytes = used;
-            haveSpace = true;
-        }
+        cachedStoreOnSD = storeOnSD;
+        cachedBookCount = totalBooks;
+        spaceInitialized = true;
     }
+    size_t usedBytes = cachedUsedBytes;
+    size_t totalBytesFS = cachedTotalBytesFS;
+    bool haveSpace = cachedHaveSpace;
 
     // Helper: format bytes as "X.X MB" or "X KB"
     auto fmtBytes = [](size_t b) -> std::string {

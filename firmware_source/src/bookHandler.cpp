@@ -8,6 +8,7 @@
 #include <map>
 #include <unordered_map>
 #include <algorithm>
+#include <cctype>
 #include "device.h"
 #include "esp_log.h"
 static const char *TAG = "Bookhandler";
@@ -441,6 +442,161 @@ void BookHandler::loadBooks()
 }
 
 
+static std::string trimWhitespace(const std::string &str) {
+    size_t start = str.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos) return "";
+    size_t end = str.find_last_not_of(" \t\r\n");
+    return str.substr(start, end - start + 1);
+}
+
+static std::string stripAnnotations(const std::string &str) {
+    std::string out;
+    out.reserve(str.size());
+    int parenDepth = 0;
+    int bracketDepth = 0;
+    for (char c : str) {
+        if (c == '(') parenDepth++;
+        else if (c == ')' && parenDepth > 0) parenDepth--;
+        else if (c == '[') bracketDepth++;
+        else if (c == ']' && bracketDepth > 0) bracketDepth--;
+        else if (parenDepth == 0 && bracketDepth == 0) out += c;
+    }
+    return out;
+}
+
+static std::string normalizeForSort(const std::string &str) {
+    std::string out;
+    out.reserve(str.size());
+    for (size_t i = 0; i < str.size(); ++i) {
+        unsigned char c = static_cast<unsigned char>(str[i]);
+        if (c >= 'A' && c <= 'Z') {
+            out += static_cast<char>(c + ('a' - 'A'));
+        } else if (c == 0xD0 && i + 1 < str.size()) {
+            unsigned char c2 = static_cast<unsigned char>(str[i + 1]);
+            if (c2 == 0x81) {
+                // Cyrillic 'Ё' (U+0401) -> 'е' (U+0435 = 0xD0 0xB5)
+                out += static_cast<char>(0xD0);
+                out += static_cast<char>(0xB5);
+                ++i;
+            } else if (c2 >= 0x90 && c2 <= 0x9F) {
+                // Cyrillic 'А'..'П' (U+0410..U+041F) -> 'а'..'п' (0xD0 0xB0..0xBF)
+                out += static_cast<char>(0xD0);
+                out += static_cast<char>(c2 + 0x20);
+                ++i;
+            } else if (c2 >= 0xA0 && c2 <= 0xAF) {
+                // Cyrillic 'Р'..'Я' (U+0420..U+042F) -> 'р'..'я' (0xD1 0x80..0x8F)
+                out += static_cast<char>(0xD1);
+                out += static_cast<char>(c2 - 0x20);
+                ++i;
+            } else {
+                out += static_cast<char>(c);
+            }
+        } else if (c == 0xD1 && i + 1 < str.size() && static_cast<unsigned char>(str[i + 1]) == 0x91) {
+            // Cyrillic 'ё' (U+0451) -> 'е' (U+0435 = 0xD0 0xB5)
+            out += static_cast<char>(0xD0);
+            out += static_cast<char>(0xB5);
+            ++i;
+        } else {
+            out += static_cast<char>(c);
+        }
+    }
+    return out;
+}
+
+static bool isGenerationalSuffix(const std::string &token) {
+    std::string clean;
+    for (char c : token) {
+        if (c != '.') clean += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return clean == "jr" || clean == "sr" || clean == "ii" || clean == "iii" || clean == "iv" || clean == "v";
+}
+
+static std::string getAuthorLastNameSortKey(const std::string &author) {
+    std::string cleaned = trimWhitespace(stripAnnotations(author));
+    std::string lowerFull = normalizeForSort(cleaned);
+    if (lowerFull.empty() || lowerFull == "unknown author" || lowerFull == "error during parsing") {
+        return "\xff";
+    }
+
+    // Extract primary author if multiple authors are listed
+    size_t semiPos = cleaned.find(';');
+    if (semiPos != std::string::npos) {
+        cleaned = trimWhitespace(cleaned.substr(0, semiPos));
+    }
+    size_t ampPos = cleaned.find(" & ");
+    if (ampPos != std::string::npos) {
+        cleaned = trimWhitespace(cleaned.substr(0, ampPos));
+    }
+    std::string lowerCheck = normalizeForSort(cleaned);
+    size_t andPos = lowerCheck.find(" and ");
+    if (andPos != std::string::npos) {
+        cleaned = trimWhitespace(cleaned.substr(0, andPos));
+    }
+
+    // Handle "Last, First" or "First Last, Jr."
+    bool hasComma = false;
+    size_t commaPos = cleaned.find(',');
+    if (commaPos != std::string::npos) {
+        std::string beforeComma = trimWhitespace(cleaned.substr(0, commaPos));
+        if (!beforeComma.empty()) {
+            cleaned = beforeComma;
+            hasComma = true;
+        }
+    }
+
+    // Split into whitespace-separated tokens
+    std::vector<std::string> tokens;
+    size_t pos = 0;
+    while (pos < cleaned.size()) {
+        size_t ws = cleaned.find_first_of(" \t\r\n", pos);
+        if (ws == std::string::npos) {
+            tokens.push_back(cleaned.substr(pos));
+            break;
+        }
+        if (ws > pos) {
+            tokens.push_back(cleaned.substr(pos, ws - pos));
+        }
+        pos = ws + 1;
+    }
+
+    if (tokens.empty()) return "\xff";
+
+    if (tokens.size() > 1 && isGenerationalSuffix(tokens.back())) {
+        tokens.pop_back();
+    }
+
+    std::string lastName = tokens.back();
+    if (tokens.size() >= 2 && (tokens.size() >= 3 || hasComma)) {
+        std::string prev = normalizeForSort(tokens[tokens.size() - 2]);
+        if (prev == "le" || prev == "la" || prev == "van" || prev == "st" || prev == "st.") {
+            lastName = tokens[tokens.size() - 2] + " " + lastName;
+        }
+    }
+
+    return normalizeForSort(lastName);
+}
+
+static void sortBooksByAuthorLastName(std::vector<Book*> &books) {
+    std::sort(books.begin(), books.end(), [](const Book *a, const Book *b) {
+        if (!a || !b) return a != nullptr;
+
+        std::string lastA = getAuthorLastNameSortKey(a->author);
+        std::string lastB = getAuthorLastNameSortKey(b->author);
+        if (lastA != lastB) return lastA < lastB;
+
+        std::string fullAuthorA = normalizeForSort(a->author);
+        std::string fullAuthorB = normalizeForSort(b->author);
+        if (fullAuthorA != fullAuthorB) return fullAuthorA < fullAuthorB;
+        if (a->author != b->author) return a->author < b->author;
+
+        std::string titleA = normalizeForSort(a->title);
+        std::string titleB = normalizeForSort(b->title);
+        if (titleA != titleB) return titleA < titleB;
+
+        return a->path < b->path;
+    });
+}
+
 static std::string getBookMetaFilename(const std::string &bookPath) {
     std::string sanitized = bookPath;
     std::replace(sanitized.begin(), sanitized.end(), '/', '_');
@@ -846,7 +1002,8 @@ for (auto it = indexedBooks.begin(); it != indexedBooks.end();) {
         }
     }
 
-    // Step 4: Sort books into authorList
+    // Step 4: Sort books by author's last name, then group into authorList
+    sortBooksByAuthorLastName(this->bookList);
     for (Book* b : bookList) {
         Author* foundAuthor = nullptr;
         int currentAuthorIndex = 0;
