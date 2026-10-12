@@ -9,11 +9,17 @@ For pre-ordering a Diptyx E-reader, see their [Crowd Supply page](https://www.cr
 
 -  Faster indexing of the books.
 
+-  Cool Gothic-style decorations.
+
 - `build.sh` script to build firmware easily. Pass firmware version to it to update, like this:
 
   ```bash
   ./build.sh 1.0.5
   ```
+<img width="80%" alt="main" src="https://github.com/user-attachments/assets/ee1f2f58-27d9-42a3-82a6-1452f64b83fe" />
+<img width="80%" alt="library" src="https://github.com/user-attachments/assets/24d97a9f-3421-4ab3-b3cf-0777e2f7c408" />
+
+
 
 ## Flashing
 
