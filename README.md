@@ -13,6 +13,10 @@ For pre-ordering a Diptyx E-reader, see their [Crowd Supply page](https://www.cr
 
 -  Cool Gothic-style decorations.
 
+-  Now Reading and Recently Read menus.
+
+-  Summaries on the right page for the Library and Settings. 
+
 - `build.sh` script to build firmware easily. Pass firmware version to it to update, like this:
 
   ```bash
