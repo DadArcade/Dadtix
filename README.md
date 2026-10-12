@@ -5,9 +5,11 @@ For pre-ordering a Diptyx E-reader, see their [Crowd Supply page](https://www.cr
 
 # Features added
 
--  Folder support: You can now create folders to organize your books.
+-  Folder support: You can now create any folders to organize your books, reader will pick up them all.
 
--  Faster indexing of the books.
+-  Faster indexing of the books. Faster flipping of the pages. 
+
+-  Proper alphabet sorting of the books and authors.
 
 -  Cool Gothic-style decorations.
 
