@@ -55,7 +55,7 @@ void BookMarkMenuHandler::drawMenu()
     {
         const int MAX_VISIBLE_ITEMS = 20;
 
-        int chapterCount = epub->get_toc_items_count();
+        int chapterCount = epub ? epub->get_toc_items_count() : 0;
         if(menuElements[currentMenuElementIndex].ID==MenuElementID::GotoChapter) maxVerticalElements = chapterCount;
         if(menuElements[currentMenuElementIndex].ID==MenuElementID::GotoMark) maxVerticalElements = book->bookMarks.size();
 
@@ -111,7 +111,7 @@ void BookMarkMenuHandler::drawMenu()
             bool selected = (chapterIndex == currentVerticalElementIndex - 1);
 
             std::string itemString;
-            if(menuElements[currentMenuElementIndex].ID==MenuElementID::GotoChapter) itemString = epub->get_toc_item(chapterIndex).title.substr(0, 18);
+            if(menuElements[currentMenuElementIndex].ID==MenuElementID::GotoChapter && epub) itemString = epub->get_toc_item(chapterIndex).title.substr(0, 18);
             if(menuElements[currentMenuElementIndex].ID==MenuElementID::GotoMark) itemString = "Page: " + std::to_string(book->bookMarks[i].pageIndex+1) + "-" + std::to_string(book->bookMarks[i].pageIndex+2);
             //ESP_LOGI("QuickMenu", "toc name: %s", itemString.c_str());
 

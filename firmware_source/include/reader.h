@@ -5,6 +5,7 @@
 #include <string.h>
 #include "htmlParser.h"
 #include <Epub.h>
+#include "cbzHandler.h"
 #include "bookHandler.h"
 #include "bookMarkMenuHandler.h"
 extern "C" {
@@ -69,6 +70,7 @@ public:
     int findCurrentBookMarkIndex();
 
     Epub *epub = nullptr;
+    CbzArchive *cbz = nullptr;
     Renderer* renderer = nullptr;
     BookMarkMenuHandler *bookMarkMenuHandler = nullptr;
     Book *book = nullptr;
@@ -81,6 +83,7 @@ public:
     unsigned char* rightPageFrameBufferPrevious;
     //unsigned char* activeFrameBuffer;
 private:
+    void renderCbzSpread(unsigned char* leftPageFrameBuffer, unsigned char* rightPageFrameBuffer, int pageCacheIndex);
 };
 
 int countBlackPixels(unsigned char* framebuffer);

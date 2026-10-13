@@ -80,6 +80,7 @@ public:
     // compare render settings
     RenderSettings getCurrentRenderSettings();
     bool matchesRenderSettings(const RenderSettings &current) const;
+    bool isCbz() const;
 };
 
 class Author {

@@ -32,7 +32,12 @@ Reader::~Reader()
     free(rightPageFrameBufferPrevious);
     clearChapterCache();
     if (epub) {
-    delete epub;
+        delete epub;
+        epub = nullptr;
+    }
+    if (cbz) {
+        delete cbz;
+        cbz = nullptr;
     }
 }
 
@@ -67,8 +72,27 @@ void Reader::init(Book *book,Renderer* renderer)
     this->currentChapter = 0;
 
     clearChapterCache();
-    this->epub = new Epub(std::string("/sdcard/") + this->currentBookPath);
+    if (this->epub) {
+        delete this->epub;
+        this->epub = nullptr;
+    }
+    if (this->cbz) {
+        delete this->cbz;
+        this->cbz = nullptr;
+    }
+
     ESP_LOGI(TAG, "book path: %s", this->currentBookPath.c_str());
+    if (book->isCbz()) {
+        this->cbz = new CbzArchive(std::string("/sdcard/") + this->currentBookPath);
+        if (this->cbz->isOpen()) {
+            this->book->totalPageCount = this->cbz->getPageCount();
+            ESP_LOGI(TAG, "CBZ loaded: '%s' (%d pages)",
+                     this->cbz->getTitle().c_str(), this->book->totalPageCount);
+        }
+        return;
+    }
+
+    this->epub = new Epub(std::string("/sdcard/") + this->currentBookPath);
     if (epub->load())
     {
         ESP_LOGI(TAG, "book title: %s", (epub->get_title()).c_str());
@@ -89,6 +113,7 @@ int Reader::getCurrentPageAbsolute(int chapter, int page)
 
 int Reader::getCurrentChapter(int page)
 {
+    if (!this->epub) return 0;
     int pageCounter = page;
     for(int i = 0;i<this->epub->get_spine_items_count();i++)
     {
@@ -100,6 +125,7 @@ int Reader::getCurrentChapter(int page)
 
 int Reader::getCurrentPageInChapter(int page)
 {
+    if (!this->epub) return 0;
     int pageCounter = page;
     for(int i = 0;i<this->epub->get_spine_items_count();i++)
     {
@@ -127,9 +153,44 @@ void Reader::doWhileListening(std::function<void()> func)
     Device::getInstance().setLatchTimeOut(100000);
 }
 
+void Reader::renderCbzSpread(unsigned char* leftPageFrameBuffer, unsigned char* rightPageFrameBuffer, int pageCacheIndex)
+{
+    renderer->clearScreenBuffer(leftPageFrameBuffer);
+    renderer->clearScreenBuffer(rightPageFrameBuffer);
+
+    int leftIdx = book->currentPage;
+    int rightIdx = book->currentPage + 1;
+    int totalPages = cbz->getPageCount();
+
+    if (leftIdx >= 0 && leftIdx < totalPages) {
+        cbz->renderPage(leftIdx, this->renderer, leftPageFrameBuffer);
+        this->renderer->drawPageOverlay(leftPageFrameBuffer, leftIdx + 1, book->totalPageCount);
+    }
+    if (rightIdx >= 0 && rightIdx < totalPages) {
+        cbz->renderPage(rightIdx, this->renderer, rightPageFrameBuffer);
+        this->renderer->drawPageOverlay(rightPageFrameBuffer, rightIdx + 1, book->totalPageCount);
+    }
+
+    pageElementIndex[pageCacheIndex] = book->currentPage;
+    pageChapterIndex[pageCacheIndex] = 0;
+    pageImagePresent[pageCacheIndex] = true;
+
+    if (checkBookMark()) {
+        renderer->drawBookMark(rightPageFrameBuffer, false);
+    }
+    if (book->currentPage == 0) {
+        this->renderer->epd.forceRefresh();
+    }
+}
+
 int Reader::renderPages(unsigned char* leftPageFrameBuffer,unsigned char* rightPageFrameBuffer,int pageCacheIndex)
 {
     ESP_LOGI(TAG, "rendering page %d", book->currentPage);
+    if (this->cbz && this->cbz->isOpen()) {
+        renderCbzSpread(leftPageFrameBuffer, rightPageFrameBuffer, pageCacheIndex);
+        return 0;
+    }
+
     currentChapter = getCurrentChapter(book->currentPage);
     int currentPageInChapter = getCurrentPageInChapter(book->currentPage);
     std::string currentChapterPath = epub->get_spine_item(this->currentChapter);
@@ -218,6 +279,14 @@ void Reader::openPage()
 
 void Reader::nextChapter()
 {
+    if (this->cbz && this->cbz->isOpen()) {
+        int nextP = book->currentPage + 10;
+        int maxStart = (book->totalPageCount >= 2) ? ((book->totalPageCount - 1) & ~1) : 0;
+        if (nextP > maxStart) nextP = maxStart;
+        book->currentPage = nextP;
+        openPage();
+        return;
+    }
     currentChapter = getCurrentChapter(book->currentPage);
     if(currentChapter<book->chapterPageCounts.size()-1) currentChapter++;
     book->currentPage = getCurrentPageAbsolute(currentChapter,0);
@@ -226,6 +295,13 @@ void Reader::nextChapter()
 
 void Reader::prevChapter()
 {
+    if (this->cbz && this->cbz->isOpen()) {
+        int prevP = book->currentPage - 10;
+        if (prevP < 0) prevP = 0;
+        book->currentPage = prevP;
+        openPage();
+        return;
+    }
     currentChapter = getCurrentChapter(book->currentPage);
     if(currentChapter>0 && getCurrentPageInChapter(book->currentPage)==0) currentChapter--;
     book->currentPage = getCurrentPageAbsolute(currentChapter,0);
@@ -487,7 +563,7 @@ void Reader::upButtonAction()
         state = State::BookMarkMenu;
         bookMarkMenuHandler = new BookMarkMenuHandler(book,renderer,epub,leftPageFrameBuffer,rightPageFrameBuffer);
         bookMarkMenuHandler->bookMarkOnPage = checkBookMark();
-        bookMarkMenuHandler->currentTocIndex = epub->get_toc_index_for_spine_index(getCurrentChapter(book->currentPage));
+        bookMarkMenuHandler->currentTocIndex = epub ? epub->get_toc_index_for_spine_index(getCurrentChapter(book->currentPage)) : 0;
         bookMarkMenuHandler->selectedBookMarkIndex = findCurrentBookMarkIndex();
         doWhileListening([&]() {bookMarkMenuHandler->drawMenu();});
     }
@@ -579,7 +655,12 @@ void Reader::middleButtonAction()
     {
        // Device::buzz();
         if (epub) {
-        delete epub;
+            delete epub;
+            epub = nullptr;
+        }
+        if (cbz) {
+            delete cbz;
+            cbz = nullptr;
         }
         Device::getInstance().state=Device::State::Menu;
         //Device::getInstance()->saveAppState();
@@ -682,7 +763,7 @@ void Reader::middleButtonAction()
         }
         else if(bookMarkMenuHandler->menuElements[bookMarkMenuHandler->currentMenuElementIndex].ID==BookMarkMenuHandler::MenuElementID::GotoChapter)
         {
-            if(bookMarkMenuHandler->currentVerticalElementIndex!=0)
+            if(bookMarkMenuHandler->currentVerticalElementIndex!=0 && epub)
             {
                 //Device::buzz();
                 int newChapterIndex = epub->get_spine_index_for_toc_index(bookMarkMenuHandler->currentVerticalElementIndex-1);
