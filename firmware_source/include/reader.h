@@ -5,6 +5,8 @@
 #include <string.h>
 #include "htmlParser.h"
 #include <Epub.h>
+#include "cbzHandler.h"
+#include "cbrHandler.h"
 #include "bookHandler.h"
 #include "bookMarkMenuHandler.h"
 extern "C" {
@@ -69,6 +71,8 @@ public:
     int findCurrentBookMarkIndex();
 
     Epub *epub = nullptr;
+    CbzArchive *cbz = nullptr;
+    CbrArchive *cbr = nullptr;
     Renderer* renderer = nullptr;
     BookMarkMenuHandler *bookMarkMenuHandler = nullptr;
     Book *book = nullptr;
@@ -80,7 +84,32 @@ public:
     unsigned char* leftPageFrameBufferPrevious;
     unsigned char* rightPageFrameBufferPrevious;
     //unsigned char* activeFrameBuffer;
+
+    static constexpr int COMIC_ZOOM_MIN = 100;
+    static constexpr int COMIC_ZOOM_MAX = 250;
+    static constexpr int COMIC_ZOOM_STEP = 50;
+    static constexpr int COMIC_PAN_STEP_X = 120;
+    static constexpr int COMIC_PAN_STEP_Y = 160;
+
+    int comicZoomPercent = COMIC_ZOOM_MIN;
+    int comicPanX = 0;
+    int comicPanY = 0;
+
+    bool isComicZoomed() const;
+    void resetComicZoom(bool freeCache = true);
+    bool zoomComicIn();
+    bool zoomComicOut();
+    bool panComic(int deltaX, int deltaY);
+
 private:
+    ComicZoomPageCache leftZoomCache;
+    ComicZoomPageCache rightZoomCache;
+
+    bool hasOpenComic() const;
+    bool ensureCurrentSpreadZoomCache();
+    void getCurrentSpreadPanLimits(int zoomPercent, int &outMaxPanX, int &outMaxPanY) const;
+    void renderAndDisplayComicZoomSpread();
+    void renderComicSpread(unsigned char* leftPageFrameBuffer, unsigned char* rightPageFrameBuffer, int pageCacheIndex);
 };
 
 int countBlackPixels(unsigned char* framebuffer);

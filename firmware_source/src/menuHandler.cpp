@@ -737,6 +737,14 @@ void MenuHandler::openBook(Book *book)
 {
     if (!book) return;
 
+    if (book->isComic() && (book->badParse || book->totalPageCount <= 0)) {
+        Device::getInstance().bookHandler->reindexBook(book);
+        if (book->totalPageCount > 0) {
+            book->badParse = false;
+            Device::getInstance().bookHandler->saveBook(book);
+        }
+    }
+
     if (book->badParse) {
         Device::getInstance().notificationHandler->drawErrorNotification(book->title);
         vTaskDelay(pdMS_TO_TICKS(500));
@@ -1072,7 +1080,7 @@ void MenuHandler::drawLibraryInfo()
     }
 
     // --- Disk space (cached to avoid synchronous SD/LittleFS scans on every menu highlight) ---
-    static size_t cachedUsedBytes = 0, cachedTotalBytesFS = 0;
+    static uint64_t cachedUsedBytes = 0, cachedTotalBytesFS = 0;
     static bool cachedHaveSpace = false, spaceInitialized = false;
     static int cachedStoreOnSD = -1, cachedBookCount = -1;
 
@@ -1081,18 +1089,16 @@ void MenuHandler::drawLibraryInfo()
         cachedUsedBytes = 0;
         cachedTotalBytesFS = 0;
         cachedHaveSpace = false;
-        if (storeOnSD) {
-            uint64_t total64 = 0, free64 = 0;
-            if (esp_vfs_fat_info("/sdcard", &total64, &free64) == ESP_OK && total64 > 0) {
-                cachedTotalBytesFS = (size_t)total64;
-                cachedUsedBytes = (size_t)(total64 - free64);
-                cachedHaveSpace = true;
-            }
+        uint64_t total64 = 0, free64 = 0;
+        if (esp_vfs_fat_info("/sdcard", &total64, &free64) == ESP_OK && total64 > 0) {
+            cachedTotalBytesFS = total64;
+            cachedUsedBytes = (total64 >= free64) ? (total64 - free64) : 0;
+            cachedHaveSpace = true;
         } else {
             size_t total = 0, used = 0;
             if (esp_littlefs_info("bookStorage", &total, &used) == ESP_OK && total > 0) {
-                cachedTotalBytesFS = total;
-                cachedUsedBytes = used;
+                cachedTotalBytesFS = (uint64_t)total;
+                cachedUsedBytes = (uint64_t)used;
                 cachedHaveSpace = true;
             }
         }
@@ -1100,17 +1106,26 @@ void MenuHandler::drawLibraryInfo()
         cachedBookCount = totalBooks;
         spaceInitialized = true;
     }
-    size_t usedBytes = cachedUsedBytes;
-    size_t totalBytesFS = cachedTotalBytesFS;
+    uint64_t usedBytes = cachedUsedBytes;
+    uint64_t totalBytesFS = cachedTotalBytesFS;
     bool haveSpace = cachedHaveSpace;
 
-    // Helper: format bytes as "X.X MB" or "X KB"
-    auto fmtBytes = [](size_t b) -> std::string {
-        if (b >= 1024*1024) {
-            int mb10 = (int)((b * 10) / (1024*1024));
-            return std::to_string(mb10 / 10) + "." + std::to_string(mb10 % 10) + " MB";
+    // Helper: format 64-bit byte count as "X.XX GB", "X.X MB", or "X KB" without 32-bit overflow
+    auto fmtBytes = [](uint64_t b) -> std::string {
+        constexpr uint64_t ONE_KB = 1024ULL;
+        constexpr uint64_t ONE_MB = 1024ULL * 1024ULL;
+        constexpr uint64_t ONE_GB = 1024ULL * 1024ULL * 1024ULL;
+        if (b >= ONE_GB) {
+            uint64_t gb100 = (b * 100ULL + ONE_GB / 2ULL) / ONE_GB;
+            uint64_t whole = gb100 / 100ULL;
+            uint64_t frac = (gb100 % 100ULL) / 10ULL;
+            return std::to_string(whole) + "." + std::to_string(frac) + " GB";
         }
-        return std::to_string(b / 1024) + " KB";
+        if (b >= ONE_MB) {
+            uint64_t mb10 = (b * 10ULL + ONE_MB / 2ULL) / ONE_MB;
+            return std::to_string(mb10 / 10ULL) + "." + std::to_string(mb10 % 10ULL) + " MB";
+        }
+        return std::to_string(b / ONE_KB) + " KB";
     };
 
     // ---- 1. Top header box ----

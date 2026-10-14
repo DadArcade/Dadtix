@@ -378,15 +378,23 @@ void Device::displayOffScreen(std::string message)
     } 
     else if(Device::getInstance().deviceSettings.standbyScreen==1 && Device::getInstance().state==Device::State::Reading) //Idle screen 2: the cover of the current book
     {
-        ESP_LOGI(TAG, "data: %s",reader->epub->get_cover_image_item().c_str());
-        ESP_LOGI(TAG, "data: %s",reader->epub->get_path().c_str());
         renderer->framebuffer = reader->leftPageFrameBuffer; //set the renderer framebuffer to the current left page, just in case the cover can't be loaded
-        Image cover_image = Image(reader->epub->get_cover_image_item(),reader->epub->get_path());
-        cover_image.prepare();
-        cover_image.decodeAndScale(EPD_HEIGHT,EPD_WIDTH);
-        cover_image.floydSteinbergDither();
-        renderer->drawImage(cover_image,0,0);
-        
+        if (reader->cbz && reader->cbz->isOpen()) {
+            renderer->clearScreenBuffer(renderer->framebuffer);
+            reader->cbz->renderPage(0, renderer, renderer->framebuffer);
+        } else if (reader->cbr && reader->cbr->isOpen()) {
+            renderer->clearScreenBuffer(renderer->framebuffer);
+            reader->cbr->renderPage(0, renderer, renderer->framebuffer);
+        } else if (reader->epub) {
+            ESP_LOGI(TAG, "data: %s",reader->epub->get_cover_image_item().c_str());
+            ESP_LOGI(TAG, "data: %s",reader->epub->get_path().c_str());
+            Image cover_image = Image(reader->epub->get_cover_image_item(),reader->epub->get_path());
+            cover_image.prepare();
+            cover_image.decodeAndScale(EPD_HEIGHT,EPD_WIDTH);
+            cover_image.floydSteinbergDither();
+            renderer->drawImage(cover_image,0,0);
+        }
+
         renderer->drawSquare(0,0,(message.length()+2)*GLYPH_HEIGHT/2,2*GLYPH_WIDTH,false);
         renderer->drawString(GLYPH_HEIGHT/2,GLYPH_WIDTH/2,message,1,true,false,false);
         renderer->epd.forceRefresh();

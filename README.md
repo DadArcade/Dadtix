@@ -9,6 +9,11 @@ For pre-ordering a Diptyx E-reader, see their [Crowd Supply page](https://www.cr
 
 -  Faster indexing of the books.
 
+-  Comic book support (`.cbz` and `.cbr`) with dual-page zoom and pan controls:
+   - Short press **Joystick Down** to zoom in and **Joystick Up** to zoom out.
+   - Hold **Joystick Up** or **Joystick Down** to pan vertically.
+   - While zoomed in, **Left** and **Right** page buttons pan horizontally across both pages; once zoomed back out to fit the screen, they return to turning pages.
+
 - `build.sh` script to build firmware easily. Pass firmware version to it to update, like this:
 
   ```bash
