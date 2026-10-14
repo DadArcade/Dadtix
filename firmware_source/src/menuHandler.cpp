@@ -737,6 +737,14 @@ void MenuHandler::openBook(Book *book)
 {
     if (!book) return;
 
+    if (book->isComic() && (book->badParse || book->totalPageCount <= 0)) {
+        Device::getInstance().bookHandler->reindexBook(book);
+        if (book->totalPageCount > 0) {
+            book->badParse = false;
+            Device::getInstance().bookHandler->saveBook(book);
+        }
+    }
+
     if (book->badParse) {
         Device::getInstance().notificationHandler->drawErrorNotification(book->title);
         vTaskDelay(pdMS_TO_TICKS(500));

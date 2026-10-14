@@ -382,6 +382,9 @@ void Device::displayOffScreen(std::string message)
         if (reader->cbz && reader->cbz->isOpen()) {
             renderer->clearScreenBuffer(renderer->framebuffer);
             reader->cbz->renderPage(0, renderer, renderer->framebuffer);
+        } else if (reader->cbr && reader->cbr->isOpen()) {
+            renderer->clearScreenBuffer(renderer->framebuffer);
+            reader->cbr->renderPage(0, renderer, renderer->framebuffer);
         } else if (reader->epub) {
             ESP_LOGI(TAG, "data: %s",reader->epub->get_cover_image_item().c_str());
             ESP_LOGI(TAG, "data: %s",reader->epub->get_path().c_str());

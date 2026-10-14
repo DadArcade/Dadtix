@@ -1,5 +1,6 @@
 #include "bookHandler.h"
 #include "cbzHandler.h"
+#include "cbrHandler.h"
 #include "htmlParser.h"
 #include "reader.h"
 #include "cJSON.h"
@@ -15,6 +16,17 @@
 static const char *TAG = "Bookhandler";
 
 RTC_NOINIT_ATTR char rtc_currently_parsing_book[MAX_BOOK_NAME] = {0};
+RTC_NOINIT_ATTR char rtc_currently_parsing_step[MAX_PARSE_STEP] = {0};
+
+void rtc_setParsingStep(const char *step)
+{
+    if (!step) {
+        rtc_currently_parsing_step[0] = '\0';
+        return;
+    }
+    std::strncpy(rtc_currently_parsing_step, step, MAX_PARSE_STEP - 1);
+    rtc_currently_parsing_step[MAX_PARSE_STEP - 1] = '\0';
+}
 
 bool ends_with_epub(const char *filename) {
     if (!filename || filename[0] == '.') {
@@ -23,15 +35,6 @@ bool ends_with_epub(const char *filename) {
 
     const char *ext = strrchr(filename, '.');
     return ext && strcasecmp(ext, ".epub") == 0;
-}
-
-bool ends_with_cbz(const char *filename) {
-    if (!filename || filename[0] == '.') {
-        return false;   // reject hidden files
-    }
-
-    const char *ext = strrchr(filename, '.');
-    return ext && strcasecmp(ext, ".cbz") == 0;
 }
 
 
@@ -49,11 +52,13 @@ void rtc_setCurrentlyParsing(const std::string& bookPath)
                  bookPath.c_str(),
                  MAX_BOOK_NAME - 1);
     rtc_currently_parsing_book[MAX_BOOK_NAME - 1] = '\0';
+    rtc_setParsingStep("start");
 }
 
 void rtc_clearCurrentlyParsing()
 {
     rtc_currently_parsing_book[0] = '\0';
+    rtc_currently_parsing_step[0] = '\0';
 }
 
 std::string rtc_getCurrentlyParsing()
@@ -180,6 +185,16 @@ std::string Book::toJSON() const {
     cJSON_AddNumberToObject(root, "currentPageElementIndex", currentPageElementIndex);
     cJSON_AddNumberToObject(root, "currentPage", currentPage);
     cJSON_AddNumberToObject(root, "badParse", badParse);
+    if (!parseError.empty()) {
+        cJSON_AddStringToObject(root, "parseError", parseError.c_str());
+    }
+    if (!parseLog.empty()) {
+        cJSON *logArr = cJSON_CreateArray();
+        for (const std::string &line : parseLog) {
+            cJSON_AddItemToArray(logArr, cJSON_CreateString(line.c_str()));
+        }
+        cJSON_AddItemToObject(root, "parseLog", logArr);
+    }
     cJSON_AddNumberToObject(root, "favorite", favorite);
     cJSON_AddNumberToObject(root, "lastReadCounter", lastReadCounter);
 
@@ -256,6 +271,8 @@ Book *Book::fromJSON(const std::string &json) {
     cJSON *jreadElement = cJSON_GetObjectItem(root, "currentPageElementIndex");
     cJSON *jrender = cJSON_GetObjectItem(root, "renderSettings");
     cJSON *jbadParse = cJSON_GetObjectItem(root, "badParse");
+    cJSON *jparseError = cJSON_GetObjectItem(root, "parseError");
+    cJSON *jparseLog = cJSON_GetObjectItem(root, "parseLog");
     cJSON *jfavorite = cJSON_GetObjectItem(root, "favorite");
     cJSON *jlastRead = cJSON_GetObjectItem(root, "lastReadCounter");
     cJSON *jbookMarks = cJSON_GetObjectItem(root, "bookMarks");
@@ -266,6 +283,18 @@ Book *Book::fromJSON(const std::string &json) {
     book->chapterCount = cJSON_IsNumber(jchapterCount) ? jchapterCount->valueint : 0;
     book->currentPage = cJSON_IsNumber(jread) ? jread->valueint : 0;
     book->badParse = cJSON_IsNumber(jbadParse) ? jbadParse->valueint : false;
+    if (cJSON_IsString(jparseError) && jparseError->valuestring) {
+        book->parseError = jparseError->valuestring;
+    }
+    if (jparseLog && cJSON_IsArray(jparseLog)) {
+        int logLen = cJSON_GetArraySize(jparseLog);
+        for (int i = 0; i < logLen; ++i) {
+            cJSON *item = cJSON_GetArrayItem(jparseLog, i);
+            if (cJSON_IsString(item) && item->valuestring) {
+                book->parseLog.push_back(item->valuestring);
+            }
+        }
+    }
     book->favorite = cJSON_IsNumber(jfavorite) ? jfavorite->valueint : false;
     book->lastReadCounter = cJSON_IsNumber(jlastRead) ? (uint32_t)jlastRead->valueint : 0;
 
@@ -348,8 +377,16 @@ bool Book::isCbz() const {
     return isCbzFilename(this->path);
 }
 
+bool Book::isCbr() const {
+    return isCbrFilename(this->path);
+}
+
+bool Book::isComic() const {
+    return isComicFilename(this->path);
+}
+
 bool Book::matchesRenderSettings(const RenderSettings &current) const {
-    if (isCbz() && totalPageCount > 0) {
+    if (isComic() && totalPageCount > 0) {
         return true;
     }
     return renderSettings.fontSize == current.fontSize &&
@@ -818,26 +855,105 @@ void BookHandler::transferDataToFlash()
 }
 
 
-static Book *indexNewCbzBook(
+static void captureBookFileDiagnostics(const std::string &fullPath, std::vector<std::string> &outLog)
+{
+    outLog.push_back("full_path=" + fullPath);
+
+    struct stat st{};
+    errno = 0;
+    if (stat(fullPath.c_str(), &st) != 0) {
+        int err = errno;
+        outLog.push_back("stat=failed errno=" + std::to_string(err) + " (" + std::string(strerror(err)) + ")");
+    } else {
+        outLog.push_back("stat=ok size_bytes=" + std::to_string(static_cast<long long>(st.st_size)));
+    }
+
+    FILE *f = fopen(fullPath.c_str(), "rb");
+    if (!f) {
+        int err = errno;
+        outLog.push_back("fopen_rb=failed errno=" + std::to_string(err) + " (" + std::string(strerror(err)) + ")");
+    } else {
+        unsigned char hdr[8] = {0};
+        size_t n = fread(hdr, 1, sizeof(hdr), f);
+        fclose(f);
+        char hex[64] = {0};
+        int pos = 0;
+        for (size_t i = 0; i < n && pos < 56; ++i) {
+            pos += snprintf(hex + pos, sizeof(hex) - pos, "%02X ", hdr[i]);
+        }
+        const char *sigType = "unknown";
+        if (n >= 7 && hdr[0] == 0x52 && hdr[1] == 0x61 && hdr[2] == 0x72 &&
+            hdr[3] == 0x21 && hdr[4] == 0x1A && hdr[5] == 0x07) {
+            sigType = (hdr[6] == 0x00) ? "RAR3/4" : ((hdr[6] == 0x01) ? "RAR5" : "RAR_future");
+        } else if (n >= 4 && hdr[0] == 0x50 && hdr[1] == 0x4B) {
+            sigType = "ZIP/CBZ/EPUB";
+        }
+        outLog.push_back(std::string("magic_8b=") + hex + "(" + sigType + ")");
+    }
+
+#ifdef ESP_PLATFORM
+    char heapBuf[160];
+    snprintf(heapBuf, sizeof(heapBuf),
+             "heap free_psram=%zu largest_psram=%zu free_int=%zu largest_int=%zu",
+             heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+             heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
+             heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+    outLog.push_back(heapBuf);
+#endif
+}
+
+static Book *indexNewComicBook(
     const std::string &fileName,
     const std::string &fullPath,
     const Book::RenderSettings &currentRS,
     Device &dev)
 {
-    ESP_LOGI(TAG, "Indexing new CBZ comic: %s", fullPath.c_str());
+    ESP_LOGI(TAG, "Indexing new comic archive: %s", fullPath.c_str());
     vTaskDelay(20);
 
-    CbzArchive cbz(fullPath);
-    if (cbz.isOpen() && cbz.getPageCount() > 0) {
-        std::string title = cbz.getTitle();
-        std::string author = cbz.getAuthor();
-        dev.notificationHandler->drawIndexingNotification(title);
-        return new Book(fileName, title, author, cbz.getPageCount(), 0, std::vector<int>{}, currentRS);
+    std::vector<std::string> diagLog;
+    captureBookFileDiagnostics(fullPath, diagLog);
+    std::string failReason = "Unknown comic archive parsing error";
+
+    if (isCbzFilename(fileName)) {
+        rtc_setParsingStep("cbz:open");
+        CbzArchive cbz(fullPath);
+        diagLog.push_back("cbz_open=" + std::string(cbz.isOpen() ? "true" : "false") +
+                          " pages=" + std::to_string(cbz.getPageCount()));
+        if (cbz.isOpen() && cbz.getPageCount() > 0) {
+            std::string title = cbz.getTitle();
+            std::string author = cbz.getAuthor();
+            dev.notificationHandler->drawIndexingNotification(title);
+            return new Book(fileName, title, author, cbz.getPageCount(), 0, std::vector<int>{}, currentRS);
+        }
+        failReason = cbz.isOpen()
+            ? "CBZ opened successfully, but contains 0 supported image pages (.jpg/.jpeg/.png)"
+            : "Failed to open CBZ archive via miniz";
+    } else if (isCbrFilename(fileName)) {
+        rtc_setParsingStep("cbr:init");
+        CbrArchive cbr(fullPath);
+        for (const std::string &step : cbr.getParseLog()) {
+            diagLog.push_back(step);
+        }
+        if (cbr.isOpen() && cbr.getPageCount() > 0) {
+            std::string title = cbr.getTitle();
+            std::string author = cbr.getAuthor();
+            dev.notificationHandler->drawIndexingNotification(title);
+            return new Book(fileName, title, author, cbr.getPageCount(), 0, std::vector<int>{}, currentRS);
+        }
+        if (!cbr.getLastError().empty()) {
+            failReason = cbr.getLastError();
+        } else {
+            failReason = "CBR archive failed to open or contains 0 supported image pages";
+        }
     }
 
     dev.notificationHandler->drawErrorNotification(fileName);
     Book *book = new Book(fileName, fileName, std::string("error during parsing"), 0, 0, std::vector<int>{}, currentRS);
     book->badParse = true;
+    book->parseError = failReason;
+    book->parseLog = std::move(diagLog);
     vTaskDelay(100);
     return book;
 }
@@ -902,7 +1018,7 @@ void BookHandler::listBooks(void)
                     ? std::string(entry->d_name)
                     : (relDir + "/" + entry->d_name);
                 dirsToVisit.push_back(std::move(subRelDir));
-            } else if (ends_with_epub(entry->d_name) || ends_with_cbz(entry->d_name)) {
+            } else if (ends_with_epub(entry->d_name) || isComicFilename(entry->d_name)) {
                 std::string relFilePath = relDir.empty()
                     ? std::string(entry->d_name)
                     : (relDir + "/" + entry->d_name);
@@ -917,14 +1033,36 @@ void BookHandler::listBooks(void)
         auto it = indexedBooks.find(fileName);
 
         if (it != indexedBooks.end()) {
-            // Cached book exists
+            // Cached book exists: if a comic previously failed parsing, re-attempt automatically
             book = it->second;
+            if (book->isComic() && (book->badParse || book->totalPageCount <= 0)) {
+                std::string fullPath = std::string(sdPath) + "/" + fileName;
+                rtc_setCurrentlyParsing(fileName);
+                Book *reindexed = indexNewComicBook(fileName, fullPath, currentRS, dev);
+                rtc_clearCurrentlyParsing();
+                if (reindexed) {
+                    if (!reindexed->badParse && reindexed->totalPageCount > 0) {
+                        book->title = reindexed->title;
+                        book->author = reindexed->author;
+                        book->totalPageCount = reindexed->totalPageCount;
+                        book->badParse = false;
+                        book->parseError.clear();
+                        book->parseLog.clear();
+                    } else {
+                        book->parseError = reindexed->parseError;
+                        book->parseLog = reindexed->parseLog;
+                    }
+                    saveBook(book);
+                    delete reindexed;
+                }
+            }
             this->bookList.push_back(book);  
         } else {
             // New book -> index and save
             std::string fullPath = std::string(sdPath) + "/" + fileName;
             if (rtc_isCurrentlyParsing(fileName)) { //if the book is malformed and somehow crashes the loader, this is triggered
-                //notify the user about the error, and store the epub as malformed
+                //notify the user about the error, and store the book as malformed with crash breadcrumbs
+                std::string lastStep(rtc_currently_parsing_step);
                 dev.notificationHandler->drawErrorNotification(fileName);
                 book = new Book(fileName,
                                     fileName,
@@ -934,6 +1072,10 @@ void BookHandler::listBooks(void)
                                     std::vector<int> {},
                                     currentRS);
                 book->badParse = true;
+                book->parseError = "Crash or watchdog reset while parsing at step: '" +
+                                   (lastStep.empty() ? std::string("unknown") : lastStep) + "'";
+                captureBookFileDiagnostics(fullPath, book->parseLog);
+                book->parseLog.push_back("rtc_crash_recovery=1 last_step=" + lastStep);
                 this->bookList.push_back(book);
                 indexedBooks[fileName] = book;
                 // Save immediately to LittleFS
@@ -941,10 +1083,10 @@ void BookHandler::listBooks(void)
                 rtc_clearCurrentlyParsing();
                 vTaskDelay(100);
             }
-            else if (isCbzFilename(fileName))
+            else if (isComicFilename(fileName))
             {
                 rtc_setCurrentlyParsing(fileName);
-                book = indexNewCbzBook(fileName, fullPath, currentRS, dev);
+                book = indexNewComicBook(fileName, fullPath, currentRS, dev);
                 this->bookList.push_back(book);
                 indexedBooks[fileName] = book;
                 saveBook(book);
@@ -991,6 +1133,8 @@ void BookHandler::listBooks(void)
                                         std::vector<int> {},
                                         currentRS);
                     book->badParse = true;
+                    book->parseError = "EPUB load() returned false (invalid ZIP container or missing/corrupt content.opf)";
+                    captureBookFileDiagnostics(fullPath, book->parseLog);
                     this->bookList.push_back(book);
                     indexedBooks[fileName] = book;
                     // Save immediately to LittleFS
@@ -1137,14 +1281,41 @@ void BookHandler::updateReadPage(const std::string &bookPath, int newPageCount) 
 void BookHandler::reindexBook(Book *book) {
     if (!book) return;
 
-    if (book->isCbz()) {
-        CbzArchive cbz(std::string("/sdcard/") + book->path);
-        if (cbz.isOpen() && cbz.getPageCount() > 0) {
-            book->totalPageCount = cbz.getPageCount();
+    if (book->isComic()) {
+        std::string fullPath = std::string("/sdcard/") + book->path;
+        book->parseLog.clear();
+        captureBookFileDiagnostics(fullPath, book->parseLog);
+        if (book->isCbz()) {
+            CbzArchive cbz(fullPath);
+            if (cbz.isOpen() && cbz.getPageCount() > 0) {
+                book->totalPageCount = cbz.getPageCount();
+                book->badParse = false;
+                book->parseError.clear();
+                book->parseLog.clear();
+            } else {
+                book->badParse = true;
+                book->parseError = "Reindex failed to open CBZ or found 0 image pages";
+            }
+        } else if (book->isCbr()) {
+            CbrArchive cbr(fullPath);
+            for (const std::string &step : cbr.getParseLog()) {
+                book->parseLog.push_back(step);
+            }
+            if (cbr.isOpen() && cbr.getPageCount() > 0) {
+                book->totalPageCount = cbr.getPageCount();
+                book->badParse = false;
+                book->parseError.clear();
+                book->parseLog.clear();
+            } else {
+                book->badParse = true;
+                book->parseError = cbr.getLastError().empty()
+                    ? "Reindex failed to open CBR or found 0 image pages"
+                    : cbr.getLastError();
+            }
         }
         book->renderSettings = book->getCurrentRenderSettings();
         saveBook(book);
-        ESP_LOGI(TAG, "Re-indexed and saved CBZ book: %s", book->title.c_str());
+        ESP_LOGI(TAG, "Re-indexed and saved comic book: %s", book->title.c_str());
         return;
     }
 

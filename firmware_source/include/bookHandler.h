@@ -16,7 +16,10 @@
 
 
 #define MAX_BOOK_NAME 256
+#define MAX_PARSE_STEP 128
 extern RTC_NOINIT_ATTR char rtc_currently_parsing_book[MAX_BOOK_NAME];
+extern RTC_NOINIT_ATTR char rtc_currently_parsing_step[MAX_PARSE_STEP];
+void rtc_setParsingStep(const char *step);
 
 
 class Book {
@@ -56,6 +59,8 @@ public:
     bool badParse = false;
     bool favorite = false;
     uint32_t lastReadCounter = 0;
+    std::string parseError;
+    std::vector<std::string> parseLog;
     std::vector<int> chapterPageCounts;
     std::vector<BookMark> bookMarks;
     std::vector<cachedImage> cachedImages;
@@ -81,6 +86,8 @@ public:
     RenderSettings getCurrentRenderSettings();
     bool matchesRenderSettings(const RenderSettings &current) const;
     bool isCbz() const;
+    bool isCbr() const;
+    bool isComic() const;
 };
 
 class Author {
