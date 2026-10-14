@@ -20,6 +20,12 @@ For pre-ordering a Diptyx E-reader, see their [Crowd Supply page](https://www.cr
   ./build.sh 1.0.5
   ```
 
+## Pictures
+
+<img width="80%" height="669" alt="main" src="https://github.com/user-attachments/assets/26d00e6a-57e1-4364-898d-09c1c611fd39" />
+<img width="80%"  alt="library" src="https://github.com/user-attachments/assets/a8927c27-616b-4f77-857c-9606bcccfdc8" />
+
+
 ## Flashing
 
 To enter flash mode on your device, make sure it is fully turned off for at least 20 seconds. Then, press and hold the center joystick whilst connecting the device with a USB type-C cable to your pc. 
