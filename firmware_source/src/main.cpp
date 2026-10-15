@@ -474,6 +474,20 @@ void main_task(void *param) {
                 simpleReader->rightPageAction();
             }
         }
+        if(device.buttonLatchedStates[ARROW_LEFT_BUTTON] || device.buttonStates[ARROW_LEFT_BUTTON])
+        {
+            if(device.state==Device::State::Menu)
+            {
+                menuHandler->leftButtonAction();
+            }
+        }
+        if(device.buttonLatchedStates[ARROW_RIGHT_BUTTON] || device.buttonStates[ARROW_RIGHT_BUTTON])
+        {
+            if(device.state==Device::State::Menu)
+            {
+                menuHandler->rightButtonAction();
+            }
+        }
     //check if we have entered file transfer mode
     if(device.state == Device::State::USB_FileTransfer) {
         if(device.reader->book)

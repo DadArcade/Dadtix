@@ -26,6 +26,10 @@ MenuHandler::MenuHandler(Renderer *renderer)
     this->renderer = renderer;
     this->leftPageFrameBuffer = (unsigned char*)calloc(EPD_WIDTH * EPD_HEIGHT / 8,sizeof(unsigned char));
     this->rightPageFrameBuffer = (unsigned char*)calloc(EPD_WIDTH * EPD_HEIGHT / 8,sizeof(unsigned char));
+    this->prevRightPageFrameBuffer = (unsigned char*)calloc(EPD_WIDTH * EPD_HEIGHT / 8,sizeof(unsigned char));
+    if (this->prevRightPageFrameBuffer) {
+        memset(this->prevRightPageFrameBuffer, 0xFF, (EPD_WIDTH * EPD_HEIGHT) / 8);
+    }
     mainMenu = std::make_shared<MenuElement>(renderer, std::string("Diptyx E-reader"),std::string(""));
     authorMenu = std::make_shared<MenuElement>(renderer, std::string("Library"),std::string("Open & read books"));
     settingsMenu = std::make_shared<MenuElement>(renderer, std::string("Settings"),std::string("Edit main settings, render settings, etc."));
@@ -268,42 +272,87 @@ auto fileTransferButton = std::make_shared<ActionElement>(
 void MenuHandler::upButtonAction()
 {
     if (auto menu = std::static_pointer_cast<MenuElement>(currentElement)) {
+        if(menu->children.size() == 0) return;
 
-        if(menu->selectedChildIndex>0)
+        if(menu->children[menu->selectedChildIndex]->getType()==UIElementType::Value)
         {
-            //if(!this->buzzDisabled) Device::buzz();
-            if(menu->children[menu->selectedChildIndex]->getType()==UIElementType::Value)
-            {
-                std::static_pointer_cast<ValueElement>(menu->children[menu->selectedChildIndex])->selected = false;
-                std::static_pointer_cast<ValueElement>(menu->children[menu->selectedChildIndex])->ReadValue();
-            }
-            if(menu->selectedChildIndex% MaxElementsPerPage == 0) renderer->epd.forceRefresh();
-            else renderer->epd.partialUpdatesRemaining[1] = 8;
-            menu->selectedChildIndex--;
-            drawMenu();
-            //if(!this->buzzDisabled) Device::buzz();
+            std::static_pointer_cast<ValueElement>(menu->children[menu->selectedChildIndex])->selected = false;
+            std::static_pointer_cast<ValueElement>(menu->children[menu->selectedChildIndex])->ReadValue();
         }
 
+        // Detect if button is long-pressed (held for >= 300ms)
+        const int longPressThresholdMs = 300;
+        int heldMs = 0;
+        while (!gpio_get_level(ARROW_UP_BUTTON) && heldMs < longPressThresholdMs) {
+            vTaskDelay(pdMS_TO_TICKS(15));
+            heldMs += 15;
+        }
+
+        bool isLongPress = (heldMs >= longPressThresholdMs);
+
+        if (isLongPress && menu->children.size() > MaxElementsPerPage) {
+            int target = menu->selectedChildIndex - MaxElementsPerPage;
+            if (target < 0) target = 0;
+            menu->selectedChildIndex = target;
+            Device::buzz();
+        } else {
+            if(menu->selectedChildIndex > 0) {
+                menu->selectedChildIndex--;
+            }
+        }
+
+        renderer->epd.partialUpdatesRemaining[1] = std::max(renderer->epd.partialUpdatesRemaining[1], 8);
+        drawMenu();
+
+        if (isLongPress) {
+            while (!gpio_get_level(ARROW_UP_BUTTON)) {
+                vTaskDelay(pdMS_TO_TICKS(20));
+            }
+            Device::getInstance().clearButtonLatches();
+        }
     }
 }
 
 void MenuHandler::downButtonAction()
 {
     if (auto menu = std::static_pointer_cast<MenuElement>(currentElement)) {
+        if(menu->children.size() == 0) return;
 
-        if(menu->children.size()!=0 && menu->selectedChildIndex<menu->children.size()-1)
+        if(menu->children[menu->selectedChildIndex]->getType()==UIElementType::Value)
         {
-            //if(!this->buzzDisabled) Device::buzz();
-            if(menu->children[menu->selectedChildIndex]->getType()==UIElementType::Value)
-            {
-                std::static_pointer_cast<ValueElement>(menu->children[menu->selectedChildIndex])->selected = false;
-                std::static_pointer_cast<ValueElement>(menu->children[menu->selectedChildIndex])->ReadValue();
+            std::static_pointer_cast<ValueElement>(menu->children[menu->selectedChildIndex])->selected = false;
+            std::static_pointer_cast<ValueElement>(menu->children[menu->selectedChildIndex])->ReadValue();
+        }
+
+        // Detect if button is long-pressed (held for >= 300ms)
+        const int longPressThresholdMs = 300;
+        int heldMs = 0;
+        while (!gpio_get_level(ARROW_DOWN_BUTTON) && heldMs < longPressThresholdMs) {
+            vTaskDelay(pdMS_TO_TICKS(15));
+            heldMs += 15;
+        }
+
+        bool isLongPress = (heldMs >= longPressThresholdMs);
+
+        if (isLongPress && menu->children.size() > MaxElementsPerPage) {
+            int target = menu->selectedChildIndex + MaxElementsPerPage;
+            if (target >= (int)menu->children.size()) target = (int)menu->children.size() - 1;
+            menu->selectedChildIndex = target;
+            Device::buzz();
+        } else {
+            if(menu->selectedChildIndex < (int)menu->children.size() - 1) {
+                menu->selectedChildIndex++;
             }
-            menu->selectedChildIndex++;
-            if(menu->selectedChildIndex% MaxElementsPerPage == 0) renderer->epd.forceRefresh();
-            else renderer->epd.partialUpdatesRemaining[1] = 8;
-            drawMenu();
-            //if(!this->buzzDisabled) Device::buzz();
+        }
+
+        renderer->epd.partialUpdatesRemaining[1] = std::max(renderer->epd.partialUpdatesRemaining[1], 8);
+        drawMenu();
+
+        if (isLongPress) {
+            while (!gpio_get_level(ARROW_DOWN_BUTTON)) {
+                vTaskDelay(pdMS_TO_TICKS(20));
+            }
+            Device::getInstance().clearButtonLatches();
         }
     }
 }
@@ -320,7 +369,7 @@ void MenuHandler::middleButtonAction()
             {        
                 //if(!this->buzzDisabled) Device::buzz();
                 this->currentElement = menu->children[menu->selectedChildIndex];
-                renderer->epd.forceRefresh();
+                renderer->epd.partialUpdatesRemaining[1] = std::max(renderer->epd.partialUpdatesRemaining[1], 8);
                 drawMenu();
                 //if(!this->buzzDisabled) Device::buzz();
             }
@@ -431,7 +480,7 @@ void MenuHandler::leftButtonAction()
             this->currentElement = parent;
             Device::getInstance().bookHandler->refreshFavorites();
             refreshRecentBooksElement();
-            renderer->epd.forceRefresh();
+            renderer->epd.partialUpdatesRemaining[1] = std::max(renderer->epd.partialUpdatesRemaining[1], 8);
             drawMenu();
             //if(!this->buzzDisabled) Device::buzz();
         }
@@ -709,6 +758,7 @@ Book* MenuHandler::getNowReadingBook()
 void MenuHandler::updateNowReadingElement()
 {
     if (!nowReadingButton) return;
+    if (currentElement != mainMenu) return;
     Book *book = getNowReadingBook();
     if (book) {
         nowReadingButton->elementDescription = book->title;
@@ -1634,13 +1684,24 @@ void MenuHandler::drawMenu()
         drawLibraryDetails();
     }
     this->renderer->drawBattery(rightPageFrameBuffer,Device::getInstance().getBatteryPercentage());
-    renderer->epd.DisplayPictureBoth(leftPageFrameBuffer,rightPageFrameBuffer);
+
+    const size_t fbSize = (EPD_WIDTH * EPD_HEIGHT) / 8;
+    bool rightChanged = true;
+    if (prevRightPageFrameBuffer != nullptr) {
+        rightChanged = (memcmp(rightPageFrameBuffer, prevRightPageFrameBuffer, fbSize) != 0);
+        if (rightChanged) {
+            memcpy(prevRightPageFrameBuffer, rightPageFrameBuffer, fbSize);
+        }
+    }
+    renderer->epd.DisplayPictureBoth(leftPageFrameBuffer, rightPageFrameBuffer, true, rightChanged);
 
     if(Device::getInstance().buttonLatchedStates[MIDDLE_BUTTON]) {middleButtonAction(); return;}
     if(Device::getInstance().buttonLatchedStates[PAGE_RIGHT_BUTTON]) {rightPageAction(); return;}
     if(Device::getInstance().buttonLatchedStates[PAGE_LEFT_BUTTON]) {leftPageAction(); return;}
     if(Device::getInstance().buttonLatchedStates[ARROW_DOWN_BUTTON]) {downButtonAction(); return;}
     if(Device::getInstance().buttonLatchedStates[ARROW_UP_BUTTON]) {upButtonAction(); return;}
+    if(Device::getInstance().buttonLatchedStates[ARROW_RIGHT_BUTTON]) {rightButtonAction(); return;}
+    if(Device::getInstance().buttonLatchedStates[ARROW_LEFT_BUTTON]) {leftButtonAction(); return;}
 }
 
 void MenuHandler::drawValuePartial()

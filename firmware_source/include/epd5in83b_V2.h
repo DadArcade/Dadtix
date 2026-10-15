@@ -34,7 +34,7 @@ public:
     void Reset(void);
     void activateDisplay(bool isLeft);
     void DisplayPicture(bool isLeft, const UBYTE *blackimage);
-    void DisplayPictureBoth(const unsigned char *leftScreenBuffer, const unsigned char *rightScreenBuffer);
+    void DisplayPictureBoth(const unsigned char *leftScreenBuffer, const unsigned char *rightScreenBuffer, bool updateLeft = true, bool updateRight = true);
     void DisplayPictureBoth(const unsigned char *leftScreenBuffer, const unsigned char *rightScreenBuffer,std::function<void()> callback);
     void sendScreenBuffer(const unsigned char *screenBuffer,bool isFlipped);
     void SendCommand(unsigned char command);

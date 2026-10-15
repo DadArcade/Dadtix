@@ -247,6 +247,13 @@ void Device::initADC()
 
 float Device::getBatteryVoltage()
 {
+    static int64_t lastSampleTime = 0;
+    static float cachedVoltage = 0.0f;
+    int64_t now = esp_timer_get_time();
+    if (cachedVoltage > 0.0f && (now - lastSampleTime) < 15000000LL) {
+        return cachedVoltage;
+    }
+
     int raw = 0;
     int sum = 0;
 
@@ -268,7 +275,9 @@ float Device::getBatteryVoltage()
     // Scale up for divider (100k / 100k = ×2)
     gpio_set_level(B_SENSE_CTRL, 0);
     gpio_hold_en(B_SENSE_CTRL);
-    return (voltage_mv / 1000.0f) * 2.0f;
+    cachedVoltage = (voltage_mv / 1000.0f) * 2.0f;
+    lastSampleTime = now;
+    return cachedVoltage;
 }
 
 int Device::getBatteryPercentage()

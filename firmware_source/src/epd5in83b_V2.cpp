@@ -428,7 +428,7 @@ void Epd::forceDoubleRefresh()
     this->partialUpdatesRemaining[1] = 0;
 }
 
-void Epd::DisplayPictureBoth(const unsigned char *leftScreenBuffer, const unsigned char *rightScreenBuffer)
+void Epd::DisplayPictureBoth(const unsigned char *leftScreenBuffer, const unsigned char *rightScreenBuffer, bool updateLeft, bool updateRight)
 {
     initSPI();
     DelayMs(10);
@@ -441,6 +441,8 @@ void Epd::DisplayPictureBoth(const unsigned char *leftScreenBuffer, const unsign
         if(!forcedDoubleRefresh) partialUpdatesRemaining[true] = Device::getInstance().deviceSettings.displayRefresh;
         forcedDoubleRefresh = false;
         quickMode = false;
+        updateLeft = true;
+        updateRight = true;
     }
     else if(quickMode==false || displaysPoweredOn == false)
     {
@@ -454,15 +456,19 @@ void Epd::DisplayPictureBoth(const unsigned char *leftScreenBuffer, const unsign
         if(Device::getInstance().state==Device::State::Menu || Device::getInstance().reader->state==Reader::State::BookMarkMenu) quickMode = true;
     }
     
-    activateDisplay(true);
-    SendCommand(0x13);  // New image data for B/W panel
-    sendScreenBuffer(leftScreenBuffer,true);
-    SendCommand(0x12);  // Display refresh
+    if (updateLeft) {
+        activateDisplay(true);
+        SendCommand(0x13);  // New image data for B/W panel
+        sendScreenBuffer(leftScreenBuffer,true);
+        SendCommand(0x12);  // Display refresh
+    }
 
-    activateDisplay(false);
-    SendCommand(0x13);  // New image data for B/W panel
-    sendScreenBuffer(rightScreenBuffer,false);
-    SendCommand(0x12);  // Display refresh
+    if (updateRight) {
+        activateDisplay(false);
+        SendCommand(0x13);  // New image data for B/W panel
+        sendScreenBuffer(rightScreenBuffer,false);
+        SendCommand(0x12);  // Display refresh
+    }
     WaitUntilIdleBoth();
 
     if( (Device::getInstance().state!=Device::State::Menu && Device::getInstance().reader->state!=Reader::State::BookMarkMenu) || Device::getInstance().deviceSettings.sunlightMode) SleepBoth();

@@ -65,6 +65,7 @@ class MenuHandler
 
         unsigned char* leftPageFrameBuffer;
         unsigned char* rightPageFrameBuffer;
+        unsigned char* prevRightPageFrameBuffer = nullptr;
     private:
 
 };
