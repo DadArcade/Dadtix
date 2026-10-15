@@ -14,6 +14,8 @@ For pre-ordering a Diptyx E-reader, see their [Crowd Supply page](https://www.cr
    - Hold **Joystick Up** or **Joystick Down** to pan vertically.
    - While zoomed in, **Left** and **Right** page buttons pan horizontally across both pages; once zoomed back out to fit the screen, they return to turning pages.
 
+- Long press up or down in long menus skips to the next or previous page. Other ui responsiveness improvements included.
+
 - `build.sh` script to build firmware easily. Pass firmware version to it to update, like this:
 
   ```bash
