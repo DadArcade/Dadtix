@@ -610,6 +610,9 @@ static bool IsWhiteSpace(char p)
         TIXMLASSERT( p );
         TIXMLASSERT( q );
         TIXMLASSERT( nChar >= 0 );
+        if ( nChar == INT_MAX ) {
+            return strcmp( p, q ) == 0;
+        }
         return strncmp( p, q, static_cast<size_t>(nChar) ) == 0;
     }
 
@@ -795,9 +798,14 @@ public:
         element with the specified name.
     */
     const XMLElement* FirstChildElement( const char* name = 0 ) const;
+    const XMLElement* FirstChildElementIgnoreNamespace( const char* name = 0 ) const;
 
     XMLElement* FirstChildElement( const char* name = 0 )	{
         return const_cast<XMLElement*>(const_cast<const XMLNode*>(this)->FirstChildElement( name ));
+    }
+
+    XMLElement* FirstChildElementIgnoreNamespace( const char* name = 0 )	{
+        return const_cast<XMLElement*>(const_cast<const XMLNode*>(this)->FirstChildElementIgnoreNamespace( name ));
     }
 
     /// Get the last child node, or null if none exists.
@@ -845,9 +853,14 @@ public:
 
     /// Get the next (right) sibling element of this node, with an optionally supplied name.
     const XMLElement*	NextSiblingElement( const char* name = 0 ) const;
+    const XMLElement*	NextSiblingElementIgnoreNamespace( const char* name = 0 ) const;
 
     XMLElement*	NextSiblingElement( const char* name = 0 )	{
         return const_cast<XMLElement*>(const_cast<const XMLNode*>(this)->NextSiblingElement( name ) );
+    }
+
+    XMLElement*	NextSiblingElementIgnoreNamespace( const char* name = 0 )	{
+        return const_cast<XMLElement*>(const_cast<const XMLNode*>(this)->NextSiblingElementIgnoreNamespace( name ) );
     }
 
     /**
@@ -987,6 +1000,7 @@ private:
     static void DeleteNode( XMLNode* node );
     void InsertChildPreamble( XMLNode* insertThis ) const;
     const XMLElement* ToElementWithName( const char* name ) const;
+    const XMLElement* ToElementWithNameIgnoreNamespace( const char* name ) const;
 
     XMLNode( const XMLNode& );	// not supported
     XMLNode& operator=( const XMLNode& );	// not supported

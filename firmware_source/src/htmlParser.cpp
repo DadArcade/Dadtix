@@ -1,5 +1,7 @@
 #include <htmlParser.h>
 #include <esp_log.h>
+#include <algorithm>
+#include <cctype>
 
 //This code is a heavily modified version of Atomic 14's Epub reader
 static const char *TAG = "HTML Parser";
@@ -12,7 +14,7 @@ const std::vector<std::string_view> BOLD_TAGS = {"b","strong"};
 const std::vector<std::string_view> ITALIC_TAGS = {"i", "em"};
 const std::vector<std::string_view> IMAGE_TAGS = {"img"};
 const std::vector<std::string_view> COVER_TAGS = {"image"};
-const std::vector<std::string_view> SKIP_TAGS = {"title", "style","hidden"};
+const std::vector<std::string_view> SKIP_TAGS = {"title", "style","hidden","script"};
 const std::vector<std::string_view> BODY_TAGS = {"body"};
 const std::vector<std::string_view> LINK_TAGS = {"link"};
 
@@ -386,8 +388,11 @@ bool HtmlParser::Visit(const tinyxml2::XMLText &text)
   }
   if(this->currentPage<this->targetPage || this->indexingMode) currentElementIndex++;
 
-
-  parsedCodePoints = decodeHtmlEntities(utf8ToCodePoints(textValue));
+  if (encoding == UTF8) {
+    parsedCodePoints = decodeHtmlEntities(utf8ToCodePoints(textValue));
+  } else if (encoding == ISO8859_1) {
+    parsedCodePoints = decodeHtmlEntities(ISO8859_1ToCodePoints(textValue));
+  }
   
   bool drawPage = (this->currentPage==this->targetPage || this->currentPage==this->targetPage+1);
   this->contentParser->parseTextBlock(parsedCodePoints,this->isNewLine,styleHierarchy.back(),drawPage);
@@ -476,9 +481,51 @@ bool HtmlParser::VisitExit(const tinyxml2::XMLElement &element)
   return true;
 }
 
+Encoding HtmlParser::detectEncoding(const char* html, size_t length)
+{
+    if (!html || length == 0) return UTF8;
+
+    // The XML declaration is always at the very beginning of the document.
+    // Limiting search to the first 512 bytes avoids copying large chapters in memory.
+    std::string_view raw(html, std::min<size_t>(length, 512));
+
+    size_t start = raw.find("<?xml");
+    if (start == std::string_view::npos) {
+        return UTF8; // XML default
+    }
+
+    size_t end = raw.find("?>", start);
+    if (end == std::string_view::npos) {
+        return UTF8;
+    }
+
+    std::string declaration(raw.substr(start, end - start));
+
+    // Encoding names are ASCII; normalize to lowercase.
+    std::transform(declaration.begin(), declaration.end(),
+                   declaration.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+
+    if (declaration.find("windows-1252") != std::string::npos ||
+        declaration.find("cp1252") != std::string::npos) {
+        ESP_LOGI(TAG, "Detected iso8859-1 encoding");
+        return ISO8859_1;
+    }
+
+    if (declaration.find("iso-8859-1") != std::string::npos ||
+        declaration.find("iso8859-1") != std::string::npos) {
+        ESP_LOGI(TAG, "Detected iso8859-1 encoding");
+        return ISO8859_1;
+    }
+
+    ESP_LOGI(TAG, "Detected UTF8");
+    return UTF8;
+}
+
 void HtmlParser::parse()
 {
   tinyxml2::XMLDocument doc(false, tinyxml2::PEDANTIC_WHITESPACE);
+  encoding = detectEncoding(htmlRaw, htmlLength);
   doc.Parse(htmlRaw, htmlLength);
   doc.Accept(this);
 }
