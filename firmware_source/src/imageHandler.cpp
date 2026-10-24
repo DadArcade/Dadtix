@@ -298,7 +298,8 @@ void Image::decodeAndScale(int targetW, int targetH)
 void Image::decodeJPEGAndScale(int targetW, int targetH)
 {
     constexpr size_t WORK_BUF_SIZE = 32000;
-    static uint8_t work_buf[WORK_BUF_SIZE];
+    std::vector<uint8_t> workBufStorage(WORK_BUF_SIZE);
+    uint8_t *work_buf = workBufStorage.data();
 
     JDEC jd;
     JRESULT res;

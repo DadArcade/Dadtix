@@ -1,6 +1,7 @@
 #include "bookHandler.h"
 #include "cbzHandler.h"
 #include "cbrHandler.h"
+#include "pdfHandler.h"
 #include "htmlParser.h"
 #include "reader.h"
 #include "cJSON.h"
@@ -385,8 +386,12 @@ bool Book::isComic() const {
     return isComicFilename(this->path);
 }
 
+bool Book::isPdf() const {
+    return isPdfFilename(this->path);
+}
+
 bool Book::matchesRenderSettings(const RenderSettings &current) const {
-    if (isComic() && totalPageCount > 0) {
+    if ((isComic() || isPdf()) && totalPageCount > 0) {
         return true;
     }
     return renderSettings.fontSize == current.fontSize &&
@@ -479,6 +484,12 @@ void BookHandler::loadBooks()
 
         Book *book = Book::fromJSON(buffer.data());
         if (book) {
+            if ((book->isComic() || book->isPdf()) && book->totalPageCount > 0 &&
+                (book->currentPage < 0 || book->currentPage >= book->totalPageCount)) {
+                book->currentPage = 0;
+                book->currentPageElementIndex = 0;
+                book->currentPageChapterIndex = 0;
+            }
             indexedBooks[book->path] = book;
         } else {
             ESP_LOGW(TAG, "Invalid book JSON: %s", fullPath.c_str());
@@ -887,6 +898,9 @@ static void captureBookFileDiagnostics(const std::string &fullPath, std::vector<
             sigType = (hdr[6] == 0x00) ? "RAR3/4" : ((hdr[6] == 0x01) ? "RAR5" : "RAR_future");
         } else if (n >= 4 && hdr[0] == 0x50 && hdr[1] == 0x4B) {
             sigType = "ZIP/CBZ/EPUB";
+        } else if (n >= 5 && hdr[0] == 0x25 && hdr[1] == 0x50 && hdr[2] == 0x44 &&
+                   hdr[3] == 0x46 && hdr[4] == 0x2D) {
+            sigType = "PDF";
         }
         outLog.push_back(std::string("magic_8b=") + hex + "(" + sigType + ")");
     }
@@ -958,6 +972,46 @@ static Book *indexNewComicBook(
     return book;
 }
 
+static Book *indexNewPdfBook(
+    const std::string &fileName,
+    const std::string &fullPath,
+    const Book::RenderSettings &currentRS,
+    Device &dev)
+{
+    ESP_LOGI(TAG, "Indexing new PDF: %s", fullPath.c_str());
+    vTaskDelay(20);
+
+    std::vector<std::string> diagLog;
+    captureBookFileDiagnostics(fullPath, diagLog);
+    std::string failReason = "Unknown PDF parsing error";
+
+    rtc_setParsingStep("pdf:open");
+    PdfArchive pdf(fullPath);
+    diagLog.push_back("pdf_open=" + std::string(pdf.isOpen() ? "true" : "false") +
+                      " pages=" + std::to_string(pdf.getPageCount()));
+    for (const std::string &step : pdf.getParseLog()) {
+        diagLog.push_back(step);
+    }
+
+    if (pdf.isOpen() && pdf.getPageCount() > 0) {
+        std::string title = pdf.getTitle();
+        std::string author = pdf.getAuthor();
+        dev.notificationHandler->drawIndexingNotification(title);
+        Book *book = new Book(fileName, title, author, pdf.getPageCount(), 0, std::vector<int>{}, currentRS);
+        book->parseLog = std::move(diagLog);
+        return book;
+    }
+
+    failReason = !pdf.getLastError().empty() ? pdf.getLastError() : "Failed to open PDF or found 0 pages";
+    dev.notificationHandler->drawErrorNotification(fileName);
+    Book *book = new Book(fileName, fileName, std::string("error during parsing"), 0, 0, std::vector<int>{}, currentRS);
+    book->badParse = true;
+    book->parseError = failReason;
+    book->parseLog = std::move(diagLog);
+    vTaskDelay(100);
+    return book;
+}
+
 void BookHandler::listBooks(void)
 {
     if(authorList.empty()) authorList.emplace_back("Favorite books");
@@ -1018,7 +1072,7 @@ void BookHandler::listBooks(void)
                     ? std::string(entry->d_name)
                     : (relDir + "/" + entry->d_name);
                 dirsToVisit.push_back(std::move(subRelDir));
-            } else if (ends_with_epub(entry->d_name) || isComicFilename(entry->d_name)) {
+            } else if (ends_with_epub(entry->d_name) || isComicFilename(entry->d_name) || isPdfFilename(entry->d_name)) {
                 std::string relFilePath = relDir.empty()
                     ? std::string(entry->d_name)
                     : (relDir + "/" + entry->d_name);
@@ -1033,23 +1087,53 @@ void BookHandler::listBooks(void)
         auto it = indexedBooks.find(fileName);
 
         if (it != indexedBooks.end()) {
-            // Cached book exists: if a comic previously failed parsing, re-attempt automatically
+            // Cached book exists: if a comic or PDF previously failed parsing (or a PDF was indexed by an older engine), re-attempt automatically
             book = it->second;
-            if (book->isComic() && (book->badParse || book->totalPageCount <= 0)) {
+            bool needsPdfUpgrade = false;
+            if (book->isPdf()) {
+                needsPdfUpgrade = true;
+                for (const std::string &logEntry : book->parseLog) {
+                    if (logEntry == "pdf_engine=v11") {
+                        needsPdfUpgrade = false;
+                        break;
+                    }
+                }
+                if (book->totalPageCount <= 1 || !book->parseError.empty() ||
+                    book->currentPage < 0 || book->currentPage >= book->totalPageCount) {
+                    needsPdfUpgrade = true;
+                }
+            }
+            if ((book->isComic() || book->isPdf()) &&
+                (book->badParse || book->totalPageCount <= 0 || needsPdfUpgrade)) {
                 std::string fullPath = std::string(sdPath) + "/" + fileName;
                 rtc_setCurrentlyParsing(fileName);
-                Book *reindexed = indexNewComicBook(fileName, fullPath, currentRS, dev);
+                Book *reindexed = book->isPdf()
+                    ? indexNewPdfBook(fileName, fullPath, currentRS, dev)
+                    : indexNewComicBook(fileName, fullPath, currentRS, dev);
                 rtc_clearCurrentlyParsing();
                 if (reindexed) {
                     if (!reindexed->badParse && reindexed->totalPageCount > 0) {
+                        bool pageCountChanged = (book->totalPageCount != reindexed->totalPageCount);
                         book->title = reindexed->title;
                         book->author = reindexed->author;
                         book->totalPageCount = reindexed->totalPageCount;
                         book->badParse = false;
                         book->parseError.clear();
-                        book->parseLog.clear();
-                    } else {
+                        book->parseLog = reindexed->parseLog;
+                        if (needsPdfUpgrade || pageCountChanged ||
+                            book->currentPage < 0 || book->currentPage >= book->totalPageCount) {
+                            book->currentPage = 0;
+                            book->currentPageElementIndex = 0;
+                            book->currentPageChapterIndex = 0;
+                        }
+                    } else if (book->badParse || book->totalPageCount <= 0) {
+                        book->badParse = true;
                         book->parseError = reindexed->parseError;
+                        book->parseLog = reindexed->parseLog;
+                    } else {
+                        // Preserve previously indexed valid book state if an upgrade re-index hits a transient error,
+                        // but always record the latest parseLog so diagnostics reflect the current engine run.
+                        book->parseError.clear();
                         book->parseLog = reindexed->parseLog;
                     }
                     saveBook(book);
@@ -1087,6 +1171,15 @@ void BookHandler::listBooks(void)
             {
                 rtc_setCurrentlyParsing(fileName);
                 book = indexNewComicBook(fileName, fullPath, currentRS, dev);
+                this->bookList.push_back(book);
+                indexedBooks[fileName] = book;
+                saveBook(book);
+                rtc_clearCurrentlyParsing();
+            }
+            else if (isPdfFilename(fileName))
+            {
+                rtc_setCurrentlyParsing(fileName);
+                book = indexNewPdfBook(fileName, fullPath, currentRS, dev);
                 this->bookList.push_back(book);
                 indexedBooks[fileName] = book;
                 saveBook(book);
@@ -1281,13 +1374,15 @@ void BookHandler::updateReadPage(const std::string &bookPath, int newPageCount) 
 void BookHandler::reindexBook(Book *book) {
     if (!book) return;
 
-    if (book->isComic()) {
+    if (book->isComic() || book->isPdf()) {
         std::string fullPath = std::string("/sdcard/") + book->path;
         book->parseLog.clear();
         captureBookFileDiagnostics(fullPath, book->parseLog);
         if (book->isCbz()) {
             CbzArchive cbz(fullPath);
             if (cbz.isOpen() && cbz.getPageCount() > 0) {
+                book->title = cbz.getTitle();
+                book->author = cbz.getAuthor();
                 book->totalPageCount = cbz.getPageCount();
                 book->badParse = false;
                 book->parseError.clear();
@@ -1302,6 +1397,8 @@ void BookHandler::reindexBook(Book *book) {
                 book->parseLog.push_back(step);
             }
             if (cbr.isOpen() && cbr.getPageCount() > 0) {
+                book->title = cbr.getTitle();
+                book->author = cbr.getAuthor();
                 book->totalPageCount = cbr.getPageCount();
                 book->badParse = false;
                 book->parseError.clear();
@@ -1312,10 +1409,30 @@ void BookHandler::reindexBook(Book *book) {
                     ? "Reindex failed to open CBR or found 0 image pages"
                     : cbr.getLastError();
             }
+        } else if (book->isPdf()) {
+            PdfArchive pdf(fullPath);
+            book->parseLog = pdf.getParseLog();
+            if (pdf.isOpen() && pdf.getPageCount() > 0) {
+                book->title = pdf.getTitle();
+                book->author = pdf.getAuthor();
+                book->totalPageCount = pdf.getPageCount();
+                book->badParse = false;
+                book->parseError.clear();
+                if (book->currentPage < 0 || book->currentPage >= book->totalPageCount) {
+                    book->currentPage = 0;
+                    book->currentPageElementIndex = 0;
+                    book->currentPageChapterIndex = 0;
+                }
+            } else {
+                book->badParse = true;
+                book->parseError = !pdf.getLastError().empty()
+                    ? pdf.getLastError()
+                    : "Reindex failed to open PDF or found 0 image pages";
+            }
         }
         book->renderSettings = book->getCurrentRenderSettings();
         saveBook(book);
-        ESP_LOGI(TAG, "Re-indexed and saved comic book: %s", book->title.c_str());
+        ESP_LOGI(TAG, "Re-indexed and saved book: %s", book->title.c_str());
         return;
     }
 

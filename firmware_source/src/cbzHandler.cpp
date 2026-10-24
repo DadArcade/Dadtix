@@ -32,8 +32,6 @@ struct CbzArchive::ZipImpl {
     }
 };
 
-namespace {
-
 static std::string toLowerAscii(const std::string &s) {
     std::string out = s;
     for (char &c : out) {
@@ -53,7 +51,7 @@ static std::string stripExtension(const std::string &filename) {
     return filename.substr(0, dot);
 }
 
-static void computeFitDimensions(int srcW, int srcH, int maxW, int maxH, int &outW, int &outH) {
+void computeFitDimensions(int srcW, int srcH, int maxW, int maxH, int &outW, int &outH) {
     if (srcW <= 0 || srcH <= 0) {
         outW = maxW;
         outH = maxH;
@@ -74,7 +72,7 @@ static void computeFitDimensions(int srcW, int srcH, int maxW, int maxH, int &ou
     if (outH > maxH) outW = maxH;
 }
 
-static void resizeGrayscaleBilinearToPtr(
+void resizeGrayscaleBilinearToPtr(
     const uint8_t *src, int srcW, int srcH,
     uint8_t *dstOut, int dstW, int dstH)
 {
@@ -106,6 +104,8 @@ static void resizeGrayscaleBilinearToPtr(
         }
     }
 }
+
+namespace {
 
 static void resizeGrayscaleBilinear(
     const uint8_t *src, int srcW, int srcH,
@@ -465,13 +465,15 @@ static void ditherComicGray(std::vector<uint8_t> &gray, int width, int height) {
     }
 }
 
-static void enhanceAndDitherComicGray(std::vector<uint8_t> &gray, int width, int height) {
+} // namespace
+
+void enhanceAndDitherComicGray(std::vector<uint8_t> &gray, int width, int height) {
     if (gray.empty() || width <= 0 || height <= 0) return;
     normalizeComicGrayContrast(gray.data(), gray.size());
     ditherComicGray(gray, width, height);
 }
 
-static void blitDitheredToFrameBuffer(
+void blitDitheredToFrameBuffer(
     Renderer *renderer,
     unsigned char *frameBuffer,
     const std::vector<uint8_t> &dithered,
@@ -490,8 +492,6 @@ static void blitDitheredToFrameBuffer(
         }
     }
 }
-
-} // namespace
 
 uint8_t *allocComicPageBuffer(size_t size) {
     uint8_t *p = static_cast<uint8_t *>(heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));

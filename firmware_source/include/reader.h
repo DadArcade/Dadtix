@@ -7,6 +7,7 @@
 #include <Epub.h>
 #include "cbzHandler.h"
 #include "cbrHandler.h"
+#include "pdfHandler.h"
 #include "bookHandler.h"
 #include "bookMarkMenuHandler.h"
 extern "C" {
@@ -73,6 +74,7 @@ public:
     Epub *epub = nullptr;
     CbzArchive *cbz = nullptr;
     CbrArchive *cbr = nullptr;
+    PdfArchive *pdf = nullptr;
     Renderer* renderer = nullptr;
     BookMarkMenuHandler *bookMarkMenuHandler = nullptr;
     Book *book = nullptr;

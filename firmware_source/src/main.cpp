@@ -2,6 +2,7 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_heap_caps.h"
 #include "driver/spi_master.h"
 #include "esp_log.h"
 #include "epd5in83b_V2.h"
@@ -561,6 +562,10 @@ void buttonPoller(void *param) //the buttonpoller runs on a different core from 
 
 extern "C" void app_main(void)
 {
+    // Route heap allocations > 1024 bytes to PSRAM immediately at boot,
+    // preserving internal DMA-capable SRAM for SDMMC/SPI DMA and VFS descriptors.
+    heap_caps_malloc_extmem_enable(1024);
+
     //startup procedure:
     //configure the power pin, rumble, and status led
     //power pin
@@ -608,6 +613,6 @@ extern "C" void app_main(void)
 
 
     //start the app tasks
-    xTaskCreatePinnedToCore(main_task, "main_task", 70000, NULL, 5, NULL, 1);
+    xTaskCreatePinnedToCore(main_task, "main_task", 20480, NULL, 5, NULL, 1);
     xTaskCreatePinnedToCore(buttonPoller, "buttonPoller", 5000, NULL, 5, NULL, 0);
 }

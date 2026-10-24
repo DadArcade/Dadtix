@@ -68,8 +68,7 @@ int Epd::Init(void) {
         return -1;
     }
     InitNormalBoth();
-    displaysPoweredOn = true;
-    DisplayPowerTimer = esp_timer_get_time();
+    SleepBoth();
     return 0;
 }
 
@@ -132,21 +131,20 @@ void Epd::Clear(bool isLeft) {
 }
 
 void Epd::Sleep(bool isLeft) {
-    activateDisplay(isLeft);
-    SendCommand(0x02); // POWER_OFF
-    WaitUntilIdle();
-    displaysPoweredOn = false;
-    shutDownSPI();
+    (void)isLeft;
+    SleepBoth();
 }
 
 void Epd::SleepBoth() {
     ESP_LOGI("EPD", "Shutting down displays...");
+    initSPI();
     activateDisplay(true);
     SendCommand(0x02); // POWER_OFF
     activateDisplay(false);
     SendCommand(0x02); // POWER_OFF
     WaitUntilIdleBoth();
     displaysPoweredOn = false;
+    quickMode = false;
     shutDownSPI();
 }
 
@@ -502,8 +500,11 @@ void Epd::DisplayPictureBoth(const unsigned char *leftScreenBuffer, const unsign
     SendCommand(0x13);  // New image data for B/W panel
     sendScreenBuffer(rightScreenBuffer,false);
     SendCommand(0x12);  // Display refresh
-    WaitUntilIdleBoth(callback);
+    WaitUntilIdleBoth();
     SleepBoth();
+    if (callback) {
+        callback();
+    }
 }
 
 

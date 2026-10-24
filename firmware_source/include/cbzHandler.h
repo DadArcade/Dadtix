@@ -62,6 +62,11 @@ bool renderComicZoomCacheView(
     Renderer *renderer,
     unsigned char *targetFrameBuffer);
 
+void computeFitDimensions(int srcW, int srcH, int maxW, int maxH, int &outW, int &outH);
+void resizeGrayscaleBilinearToPtr(const uint8_t *src, int srcW, int srcH, uint8_t *dstOut, int dstW, int dstH);
+void enhanceAndDitherComicGray(std::vector<uint8_t> &gray, int width, int height);
+void blitDitheredToFrameBuffer(Renderer *renderer, unsigned char *frameBuffer, const std::vector<uint8_t> &dithered, int imgW, int imgH);
+
 class CbzArchive {
 public:
     struct PageEntry {

@@ -88,6 +88,7 @@ public:
     bool isCbz() const;
     bool isCbr() const;
     bool isComic() const;
+    bool isPdf() const;
 };
 
 class Author {

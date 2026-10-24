@@ -497,9 +497,12 @@ void MenuElement::renderIcon(int y, bool highlight)
 
 void BookElement::renderIcon(int y, bool highlight)
 {
-    if(!Device::getInstance().deviceSettings.showPagePercentage) this->elementDescription = (book->totalPageCount > 0 ? std::to_string((100*(book->currentPage))/(book->totalPageCount-2)) + "%" : "?%");
-    else this->elementDescription = std::to_string(book->currentPage+1) + "/" +
+    if (!Device::getInstance().deviceSettings.showPagePercentage) {
+        this->elementDescription = (book->totalPageCount > 2 ? std::to_string((100 * (book->currentPage)) / (book->totalPageCount - 2)) + "%" : "100%");
+    } else {
+        this->elementDescription = std::to_string(book->currentPage + 1) + "/" +
                     (book->totalPageCount > 0 ? std::to_string(book->totalPageCount) : "?");
+    }
     this->elementExtraDescription = book->favorite?std::string("❤"):std::string("");
     renderer->drawTextBox(
         y,elementName,true,elementDescription,false,elementExtraDescription,false,highlight);

@@ -45,6 +45,10 @@ Reader::~Reader()
         delete cbr;
         cbr = nullptr;
     }
+    if (pdf) {
+        delete pdf;
+        pdf = nullptr;
+    }
 }
 
 void Reader::clearChapterCache()
@@ -91,12 +95,22 @@ void Reader::init(Book *book,Renderer* renderer)
         delete this->cbr;
         this->cbr = nullptr;
     }
+    if (this->pdf) {
+        delete this->pdf;
+        this->pdf = nullptr;
+    }
 
     ESP_LOGI(TAG, "book path: %s", this->currentBookPath.c_str());
     if (book->isCbz()) {
         this->cbz = new CbzArchive(std::string("/sdcard/") + this->currentBookPath);
         if (this->cbz->isOpen()) {
             this->book->totalPageCount = this->cbz->getPageCount();
+            if (this->book->currentPage < 0 || this->book->currentPage >= this->book->totalPageCount) {
+                this->book->currentPage = 0;
+                this->book->currentPageElementIndex = 0;
+                this->book->currentPageChapterIndex = 0;
+            }
+            this->book->currentPage &= ~1;
             ESP_LOGI(TAG, "CBZ loaded: '%s' (%d pages)",
                      this->cbz->getTitle().c_str(), this->book->totalPageCount);
         }
@@ -106,8 +120,48 @@ void Reader::init(Book *book,Renderer* renderer)
         this->cbr = new CbrArchive(std::string("/sdcard/") + this->currentBookPath);
         if (this->cbr->isOpen()) {
             this->book->totalPageCount = this->cbr->getPageCount();
+            if (this->book->currentPage < 0 || this->book->currentPage >= this->book->totalPageCount) {
+                this->book->currentPage = 0;
+                this->book->currentPageElementIndex = 0;
+                this->book->currentPageChapterIndex = 0;
+            }
+            this->book->currentPage &= ~1;
             ESP_LOGI(TAG, "CBR loaded: '%s' (%d pages)",
                      this->cbr->getTitle().c_str(), this->book->totalPageCount);
+        }
+        return;
+    }
+    if (book->isPdf()) {
+        this->pdf = new PdfArchive(std::string("/sdcard/") + this->currentBookPath);
+        if (this->pdf->isOpen() && this->pdf->getPageCount() > 0) {
+            this->book->totalPageCount = this->pdf->getPageCount();
+            this->book->badParse = false;
+            this->book->parseError.clear();
+            for (const std::string &entry : this->pdf->getParseLog()) {
+                if (this->book->parseLog.size() < 40 &&
+                    std::find(this->book->parseLog.begin(), this->book->parseLog.end(), entry) == this->book->parseLog.end()) {
+                    this->book->parseLog.push_back(entry);
+                }
+            }
+            if (this->book->currentPage < 0 || this->book->currentPage >= this->book->totalPageCount) {
+                this->book->currentPage = 0;
+                this->book->currentPageElementIndex = 0;
+                this->book->currentPageChapterIndex = 0;
+            }
+            this->book->currentPage &= ~1;
+            ESP_LOGI(TAG, "PDF loaded: '%s' (%d pages, currentPage=%d)",
+                     this->pdf->getTitle().c_str(), this->book->totalPageCount, this->book->currentPage);
+            if (Device::getInstance().bookHandler) {
+                Device::getInstance().bookHandler->saveBook(this->book);
+            }
+        } else {
+            std::string errMsg = "reader_open_fail=" + (!this->pdf->getLastError().empty() ? this->pdf->getLastError() : "0 pages");
+            if (std::find(this->book->parseLog.begin(), this->book->parseLog.end(), errMsg) == this->book->parseLog.end()) {
+                this->book->parseLog.push_back(errMsg);
+            }
+            if (Device::getInstance().bookHandler) {
+                Device::getInstance().bookHandler->saveBook(this->book);
+            }
         }
         return;
     }
@@ -175,7 +229,9 @@ void Reader::doWhileListening(std::function<void()> func)
 
 bool Reader::hasOpenComic() const
 {
-    return (this->cbz && this->cbz->isOpen()) || (this->cbr && this->cbr->isOpen());
+    return (this->cbz && this->cbz->isOpen()) ||
+           (this->cbr && this->cbr->isOpen()) ||
+           (this->pdf && this->pdf->isOpen());
 }
 
 bool Reader::isComicZoomed() const
@@ -204,7 +260,9 @@ bool Reader::ensureCurrentSpreadZoomCache()
     int rightIdx = book->currentPage + 1;
     int totalPages = (this->cbz && this->cbz->isOpen())
         ? this->cbz->getPageCount()
-        : ((this->cbr && this->cbr->isOpen()) ? this->cbr->getPageCount() : 0);
+        : ((this->cbr && this->cbr->isOpen())
+            ? this->cbr->getPageCount()
+            : ((this->pdf && this->pdf->isOpen()) ? this->pdf->getPageCount() : 0));
 
     bool anyOk = false;
     if (leftIdx >= 0 && leftIdx < totalPages) {
@@ -212,6 +270,8 @@ bool Reader::ensureCurrentSpreadZoomCache()
             anyOk |= this->cbz->loadPageZoomCache(leftIdx, leftZoomCache);
         } else if (this->cbr && this->cbr->isOpen()) {
             anyOk |= this->cbr->loadPageZoomCache(leftIdx, leftZoomCache);
+        } else if (this->pdf && this->pdf->isOpen()) {
+            anyOk |= this->pdf->loadPageZoomCache(leftIdx, leftZoomCache);
         }
     } else {
         leftZoomCache.clear();
@@ -222,6 +282,8 @@ bool Reader::ensureCurrentSpreadZoomCache()
             anyOk |= this->cbz->loadPageZoomCache(rightIdx, rightZoomCache);
         } else if (this->cbr && this->cbr->isOpen()) {
             anyOk |= this->cbr->loadPageZoomCache(rightIdx, rightZoomCache);
+        } else if (this->pdf && this->pdf->isOpen()) {
+            anyOk |= this->pdf->loadPageZoomCache(rightIdx, rightZoomCache);
         }
     } else {
         rightZoomCache.clear();
@@ -253,7 +315,9 @@ void Reader::renderAndDisplayComicZoomSpread()
     int rightIdx = book->currentPage + 1;
     int totalPages = (this->cbz && this->cbz->isOpen())
         ? this->cbz->getPageCount()
-        : ((this->cbr && this->cbr->isOpen()) ? this->cbr->getPageCount() : 0);
+        : ((this->cbr && this->cbr->isOpen())
+            ? this->cbr->getPageCount()
+            : ((this->pdf && this->pdf->isOpen()) ? this->pdf->getPageCount() : 0));
 
     if (leftIdx >= 0 && leftIdx < totalPages) {
         if (leftZoomCache.isValidFor(leftIdx)) {
@@ -262,6 +326,8 @@ void Reader::renderAndDisplayComicZoomSpread()
             this->cbz->renderPage(leftIdx, renderer, leftPageFrameBuffer);
         } else if (this->cbr && this->cbr->isOpen()) {
             this->cbr->renderPage(leftIdx, renderer, leftPageFrameBuffer);
+        } else if (this->pdf && this->pdf->isOpen()) {
+            this->pdf->renderPage(leftIdx, renderer, leftPageFrameBuffer);
         }
         renderer->drawPageOverlay(leftPageFrameBuffer, leftIdx + 1, book->totalPageCount);
     }
@@ -273,6 +339,8 @@ void Reader::renderAndDisplayComicZoomSpread()
             this->cbz->renderPage(rightIdx, renderer, rightPageFrameBuffer);
         } else if (this->cbr && this->cbr->isOpen()) {
             this->cbr->renderPage(rightIdx, renderer, rightPageFrameBuffer);
+        } else if (this->pdf && this->pdf->isOpen()) {
+            this->pdf->renderPage(rightIdx, renderer, rightPageFrameBuffer);
         }
         renderer->drawPageOverlay(rightPageFrameBuffer, rightIdx + 1, book->totalPageCount);
     }
@@ -360,15 +428,29 @@ void Reader::renderComicSpread(unsigned char* leftPageFrameBuffer, unsigned char
     renderer->clearScreenBuffer(leftPageFrameBuffer);
     renderer->clearScreenBuffer(rightPageFrameBuffer);
 
-    int leftIdx = book->currentPage;
-    int rightIdx = book->currentPage + 1;
     int totalPages = (this->cbz && this->cbz->isOpen())
         ? this->cbz->getPageCount()
-        : ((this->cbr && this->cbr->isOpen()) ? this->cbr->getPageCount() : 0);
+        : ((this->cbr && this->cbr->isOpen())
+            ? this->cbr->getPageCount()
+            : ((this->pdf && this->pdf->isOpen()) ? this->pdf->getPageCount() : 0));
+
+    if (totalPages > 0 && pageCacheIndex == 1) {
+        if (book->totalPageCount != totalPages) {
+            book->totalPageCount = totalPages;
+        }
+        if (book->currentPage < 0 || book->currentPage >= totalPages) {
+            book->currentPage = 0;
+            book->currentPageElementIndex = 0;
+            book->currentPageChapterIndex = 0;
+        }
+    }
+
+    int leftIdx = book->currentPage;
+    int rightIdx = book->currentPage + 1;
 
     bool useZoomView = (pageCacheIndex == 1 && comicZoomPercent > COMIC_ZOOM_MIN);
 
-    auto drawComicPage = [this, useZoomView](int pageIdx, unsigned char *fb, ComicZoomPageCache &cacheSlot) {
+    auto drawComicPage = [this, useZoomView, pageCacheIndex](int pageIdx, unsigned char *fb, ComicZoomPageCache &cacheSlot) {
         if (useZoomView && cacheSlot.isValidFor(pageIdx)) {
             renderComicZoomCacheView(cacheSlot, this->comicZoomPercent, this->comicPanX, this->comicPanY, this->renderer, fb);
             return;
@@ -377,6 +459,23 @@ void Reader::renderComicSpread(unsigned char* leftPageFrameBuffer, unsigned char
             this->cbz->renderPage(pageIdx, this->renderer, fb);
         } else if (this->cbr && this->cbr->isOpen()) {
             this->cbr->renderPage(pageIdx, this->renderer, fb);
+        } else if (this->pdf && this->pdf->isOpen()) {
+            size_t logBefore = this->pdf->getParseLog().size();
+            this->pdf->renderPage(pageIdx, this->renderer, fb);
+            if (this->book && this->pdf->getParseLog().size() > logBefore) {
+                bool addedAny = false;
+                const auto &pdfLog = this->pdf->getParseLog();
+                for (size_t i = logBefore; i < pdfLog.size(); ++i) {
+                    if (this->book->parseLog.size() < 40 &&
+                        std::find(this->book->parseLog.begin(), this->book->parseLog.end(), pdfLog[i]) == this->book->parseLog.end()) {
+                        this->book->parseLog.push_back(pdfLog[i]);
+                        addedAny = true;
+                    }
+                }
+                if (addedAny && pageCacheIndex == 1 && this->book->currentPage == 0 && Device::getInstance().bookHandler) {
+                    Device::getInstance().bookHandler->saveBook(this->book);
+                }
+            }
         }
     };
 
@@ -396,7 +495,7 @@ void Reader::renderComicSpread(unsigned char* leftPageFrameBuffer, unsigned char
     if (checkBookMark()) {
         renderer->drawBookMark(rightPageFrameBuffer, false);
     }
-    if (book->currentPage == 0) {
+    if (book->currentPage == 0 && pageCacheIndex == 1) {
         this->renderer->epd.forceRefresh();
     }
 }
@@ -471,9 +570,11 @@ void Reader::openPage()
         leftPageFrameBuffer,
         rightPageFrameBuffer,
         [this]() {
-            book->currentPage += 2;
-            renderPages(leftPageFrameBufferNext, rightPageFrameBufferNext,2);
-            book->currentPage -= 2;
+            if (!hasOpenComic() || book->currentPage + 2 < book->totalPageCount) {
+                book->currentPage += 2;
+                renderPages(leftPageFrameBufferNext, rightPageFrameBufferNext,2);
+                book->currentPage -= 2;
+            }
 
             if (book->currentPage >= 2) {
                 book->currentPage -= 2;
@@ -980,6 +1081,10 @@ void Reader::middleButtonAction()
         if (cbr) {
             delete cbr;
             cbr = nullptr;
+        }
+        if (pdf) {
+            delete pdf;
+            pdf = nullptr;
         }
         Device::getInstance().state=Device::State::Menu;
         //Device::getInstance()->saveAppState();

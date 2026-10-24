@@ -787,10 +787,15 @@ void MenuHandler::openBook(Book *book)
 {
     if (!book) return;
 
-    if (book->isComic() && (book->badParse || book->totalPageCount <= 0)) {
+    if (renderer && renderer->epd.displaysPoweredOn) {
+        renderer->epd.SleepBoth();
+    }
+
+    if ((book->isComic() || book->isPdf()) &&
+        (book->badParse || book->totalPageCount <= 0 || !book->parseError.empty())) {
         Device::getInstance().bookHandler->reindexBook(book);
-        if (book->totalPageCount > 0) {
-            book->badParse = false;
+        if (book->totalPageCount > 0 && !book->badParse) {
+            book->parseError.clear();
             Device::getInstance().bookHandler->saveBook(book);
         }
     }
@@ -853,126 +858,336 @@ void MenuHandler::drawBookInfo(Book *book, const std::string &headerText, const 
     if (ax < 30) ax = 30;
     renderer->drawString(ax, 508, authorStr, 1, false, false, true);
 
-    // 3. Reading Progress & Status Card
-    drawOrnamentalCard(renderer, 16, 360, 448, 118);
+    std::string fileName = book->path;
+    size_t lastSlash = fileName.find_last_of("/\\");
+    if (lastSlash != std::string::npos) fileName = fileName.substr(lastSlash + 1);
 
-    std::string statusStr;
-    if (book->badParse) {
-        statusStr = "ERROR (Corrupt File)";
-    } else if (book->totalPageCount <= 0) {
-        statusStr = "UNINDEXED (Open to parse)";
-    } else if (book->currentPage >= book->totalPageCount - 2) {
-        statusStr = "COMPLETED ★";
-    } else if (book->currentPage > 0) {
-        statusStr = "IN PROGRESS";
+    std::string fullPath = book->path;
+    if (fullPath.empty() || fullPath[0] != '/') {
+        fullPath = "/sdcard/" + fullPath;
+    }
+
+    std::string formatStr = "EPUB";
+    if (book->isPdf()) {
+        formatStr = "PDF";
+    } else if (book->isCbz()) {
+        formatStr = "CBZ";
+    } else if (book->isCbr()) {
+        formatStr = "CBR";
+    }
+
+    static std::map<std::string, int64_t> fileSizeCache;
+    int64_t sizeBytes = -1;
+    auto sizeIt = fileSizeCache.find(fullPath);
+    if (sizeIt != fileSizeCache.end()) {
+        sizeBytes = sizeIt->second;
     } else {
-        statusStr = "UNREAD";
-    }
-
-    int percent = 0;
-    if (book->totalPageCount > 1) {
-        percent = (book->currentPage * 100) / (book->totalPageCount - 1);
-        if (percent < 0) percent = 0;
-        if (percent > 100) percent = 100;
-    } else if (book->totalPageCount == 1 && book->currentPage >= 1) {
-        percent = 100;
-    }
-
-    std::string statusLine = "Status : " + statusStr;
-    renderer->drawString(32, 452, statusLine, 1, true, false, true);
-
-    std::string pageLine;
-    if (book->totalPageCount > 0) {
-        pageLine = "Page " + std::to_string(book->currentPage + 1) + " of " + std::to_string(book->totalPageCount) + " (" + std::to_string(percent) + "% completed)";
-    } else {
-        pageLine = "Page count unknown";
-    }
-    renderer->drawString(32, 430, pageLine, 1, false, false, true);
-
-    // Custom Outlined Progress Bar
-    int pb_x = 32;
-    int pb_y = 404;
-    int pb_w = 416;
-    int pb_h = 14;
-    for (int cx = pb_x; cx < pb_x + pb_w; cx++) {
-        renderer->drawPixel(cx, pb_y, false);
-        renderer->drawPixel(cx, pb_y + 1, false);
-        renderer->drawPixel(cx, pb_y + pb_h - 1, false);
-        renderer->drawPixel(cx, pb_y + pb_h - 2, false);
-    }
-    for (int cy = pb_y; cy < pb_y + pb_h; cy++) {
-        renderer->drawPixel(pb_x, cy, false);
-        renderer->drawPixel(pb_x + 1, cy, false);
-        renderer->drawPixel(pb_x + pb_w - 1, cy, false);
-        renderer->drawPixel(pb_x + pb_w - 2, cy, false);
-    }
-    int inner_w = pb_w - 6;
-    int inner_h = pb_h - 6;
-    int fill_w = (inner_w * percent) / 100;
-    for (int cy = pb_y + 3; cy < pb_y + 3 + inner_h; cy++) {
-        for (int cx = pb_x + 3; cx < pb_x + 3 + inner_w; cx++) {
-            if (cx < pb_x + 3 + fill_w) {
-                renderer->drawPixel(cx, cy, false);
-            } else {
-                if ((cx % 2 == 0) && (cy % 2 == 0)) {
-                    renderer->drawPixel(cx, cy, false);
-                } else {
-                    renderer->drawPixel(cx, cy, true);
+        struct stat st;
+        if (stat(fullPath.c_str(), &st) == 0 && st.st_size >= 0) {
+            sizeBytes = static_cast<int64_t>(st.st_size);
+            fileSizeCache[fullPath] = sizeBytes;
+        } else {
+            for (const std::string &logEntry : book->parseLog) {
+                size_t pos = logEntry.find("size_bytes=");
+                if (pos != std::string::npos) {
+                    sizeBytes = std::strtoll(logEntry.c_str() + pos + 11, nullptr, 10);
+                    break;
                 }
+                size_t pos2 = logEntry.find("file_size=");
+                if (pos2 != std::string::npos) {
+                    sizeBytes = std::strtoll(logEntry.c_str() + pos2 + 10, nullptr, 10);
+                    break;
+                }
+            }
+            if (sizeBytes >= 0) {
+                fileSizeCache[fullPath] = sizeBytes;
             }
         }
     }
+    std::string sizeStr = "Unknown";
+    if (sizeBytes >= 0) {
+        char szBuf[64];
+        if (sizeBytes >= 1024LL * 1024LL) {
+            std::snprintf(szBuf, sizeof(szBuf), "%.1f MB", static_cast<double>(sizeBytes) / (1024.0 * 1024.0));
+        } else if (sizeBytes >= 1024LL) {
+            std::snprintf(szBuf, sizeof(szBuf), "%.1f kB", static_cast<double>(sizeBytes) / 1024.0);
+        } else {
+            std::snprintf(szBuf, sizeof(szBuf), "%lld B", static_cast<long long>(sizeBytes));
+        }
+        sizeStr = szBuf;
+    }
 
-    std::string chapterProgress;
-    if (book->chapterCount > 0) {
-        chapterProgress = "Chapter " + std::to_string(book->currentPageChapterIndex + 1) + " of " + std::to_string(book->chapterCount);
-        if (book->chapterPageCounts.size() > (size_t)book->currentPageChapterIndex && book->chapterPageCounts[book->currentPageChapterIndex] > 0) {
-            chapterProgress += " (" + std::to_string(book->chapterPageCounts[book->currentPageChapterIndex]) + " pages in chapter)";
+    auto wrapUtf8Value = [&](const std::string &str, int maxCols) -> std::vector<std::string> {
+        std::vector<std::string> lines;
+        if (str.empty()) {
+            lines.push_back("");
+            return lines;
+        }
+        size_t i = 0;
+        size_t lineStart = 0;
+        int curCols = 0;
+        while (i < str.size()) {
+            uint8_t c = static_cast<uint8_t>(str[i]);
+            int cp = 0;
+            size_t charBytes = 1;
+            if ((c & 0x80) == 0x00) {
+                cp = c;
+                charBytes = 1;
+            } else if ((c & 0xE0) == 0xC0 && i + 1 < str.size()) {
+                cp = ((c & 0x1F) << 6) | (static_cast<uint8_t>(str[i + 1]) & 0x3F);
+                charBytes = 2;
+            } else if ((c & 0xF0) == 0xE0 && i + 2 < str.size()) {
+                cp = ((c & 0x0F) << 12) | ((static_cast<uint8_t>(str[i + 1]) & 0x3F) << 6) | (static_cast<uint8_t>(str[i + 2]) & 0x3F);
+                charBytes = 3;
+            } else if ((c & 0xF8) == 0xF0 && i + 3 < str.size()) {
+                cp = ((c & 0x07) << 18) | ((static_cast<uint8_t>(str[i + 1]) & 0x3F) << 12) |
+                     ((static_cast<uint8_t>(str[i + 2]) & 0x3F) << 6) | (static_cast<uint8_t>(str[i + 3]) & 0x3F);
+                charBytes = 4;
+            }
+            int charCols = renderer->fontHandler.getCharWidth(cp);
+            if (charCols < 1) charCols = 1;
+            if (curCols + charCols > maxCols && i > lineStart) {
+                lines.push_back(str.substr(lineStart, i - lineStart));
+                lineStart = i;
+                curCols = 0;
+            }
+            curCols += charCols;
+            i += charBytes;
+        }
+        if (lineStart < str.size()) {
+            lines.push_back(str.substr(lineStart));
+        }
+        return lines;
+    };
+
+    if (book->badParse || !book->parseError.empty()) {
+        // 3 & 4. Parse Error & Diagnostics Card (replaces progress + specs when parsing failed)
+        drawOrnamentalCard(renderer, 16, 88, 448, 390);
+        std::string diagHeader = "✦  PARSE ERROR & DIAGNOSTICS  ✦";
+        int dhx = 16 + (448 - (int)diagHeader.length() * 8) / 2;
+        renderer->drawString(dhx, 454, diagHeader, 1, true, false, true);
+        for (int cx = 32; cx <= 448; cx++) {
+            renderer->drawPixel(cx, 446, false);
+        }
+
+        int curY = 426;
+        std::vector<std::string> fullPathLines = wrapUtf8Value(fullPath, 39);
+        renderer->drawString(32, curY, "Full Path : " + fullPathLines[0], 1, false, false, true);
+        for (size_t i = 1; i < fullPathLines.size() && curY >= 112; ++i) {
+            curY -= 16;
+            renderer->drawString(32 + 12 * 8, curY, fullPathLines[i], 1, false, false, true);
+        }
+        curY -= 18;
+
+        renderer->drawString(32, curY, "File Info : " + formatStr + "  •  " + sizeStr, 1, false, false, true);
+        curY -= 18;
+
+        std::string errText = book->parseError.empty() ? "Unknown parse error" : book->parseError;
+        std::vector<std::string> errLines = wrapUtf8Value(errText, 39);
+        renderer->drawString(32, curY, "Error     : " + errLines[0], 1, true, false, true);
+        for (size_t i = 1; i < errLines.size() && curY >= 112; ++i) {
+            curY -= 16;
+            renderer->drawString(32 + 12 * 8, curY, errLines[i], 1, true, false, true);
+        }
+        curY -= 18;
+
+        if (curY >= 120) {
+            for (int cx = 32; cx <= 448; cx += 2) {
+                renderer->drawPixel(cx, curY + 8, false);
+            }
+            curY -= 8;
+
+            renderer->drawString(32, curY, "Parse Log :", 1, true, false, true);
+            curY -= 18;
+
+            if (book->parseLog.empty()) {
+                if (curY >= 96) {
+                    renderer->drawString(32, curY, "  (no parseLog entries recorded)", 1, false, false, true);
+                }
+            } else {
+                std::vector<std::string> allLogLines;
+                for (const std::string &entry : book->parseLog) {
+                    std::vector<std::string> wrapped = wrapUtf8Value(entry, 50);
+                    for (size_t i = 0; i < wrapped.size(); ++i) {
+                        allLogLines.push_back(i == 0 ? wrapped[i] : ("  " + wrapped[i]));
+                    }
+                }
+
+                int maxLines = (curY >= 96) ? ((curY - 96) / 16 + 1) : 0;
+                std::vector<std::string> displayLines;
+                if (maxLines > 0) {
+                    if ((int)allLogLines.size() <= maxLines) {
+                        displayLines = allLogLines;
+                    } else if (maxLines >= 5) {
+                        size_t headCount = 3;
+                        size_t tailCount = static_cast<size_t>(maxLines - 4);
+                        for (size_t i = 0; i < headCount; ++i) {
+                            displayLines.push_back(allLogLines[i]);
+                        }
+                        size_t omitted = allLogLines.size() - headCount - tailCount;
+                        displayLines.push_back("  ... (" + std::to_string(omitted) + " lines omitted) ...");
+                        for (size_t i = allLogLines.size() - tailCount; i < allLogLines.size(); ++i) {
+                            displayLines.push_back(allLogLines[i]);
+                        }
+                    } else {
+                        for (size_t i = allLogLines.size() - static_cast<size_t>(maxLines); i < allLogLines.size(); ++i) {
+                            displayLines.push_back(allLogLines[i]);
+                        }
+                    }
+                }
+
+                for (const std::string &line : displayLines) {
+                    if (curY < 96) break;
+                    renderer->drawString(32, curY, line, 1, false, false, true);
+                    curY -= 16;
+                }
+            }
         }
     } else {
-        chapterProgress = "Chapters: None indexed";
-    }
-    renderer->drawString(32, 378, truncateString(chapterProgress, 46), 1, false, false, true);
+        // 3. Reading Progress & Status Card
+        drawOrnamentalCard(renderer, 16, 360, 448, 118);
 
-    // 4. Book Metadata & Specifications Card
-    drawOrnamentalCard(renderer, 16, 88, 448, 260);
-    std::string metaHeader = "✦  SPECIFICATIONS & SETTINGS  ✦";
-    int mhx = 16 + (448 - metaHeader.length() * 8) / 2;
-    renderer->drawString(mhx, 324, metaHeader, 1, true, false, true);
-    for (int cx = 32; cx <= 448; cx++) {
-        renderer->drawPixel(cx, 316, false);
-    }
-
-    std::string bmStr;
-    if (book->bookMarks.empty()) {
-        bmStr = "None";
-    } else {
-        bmStr = std::to_string(book->bookMarks.size()) + " saved (p.";
-        for (size_t i = 0; i < std::min((size_t)4, book->bookMarks.size()); i++) {
-            if (i > 0) bmStr += ", ";
-            bmStr += std::to_string(book->bookMarks[i].pageIndex + 1);
+        std::string statusStr;
+        if (book->totalPageCount <= 0) {
+            statusStr = "UNINDEXED (Open to parse)";
+        } else if (book->currentPage >= book->totalPageCount - 2) {
+            statusStr = "COMPLETED ★";
+        } else if (book->currentPage > 0) {
+            statusStr = "IN PROGRESS";
+        } else {
+            statusStr = "UNREAD";
         }
-        if (book->bookMarks.size() > 4) bmStr += ", ...";
-        bmStr += ")";
+
+        int percent = 0;
+        if (book->totalPageCount > 1) {
+            percent = (book->currentPage * 100) / (book->totalPageCount - 1);
+            if (percent < 0) percent = 0;
+            if (percent > 100) percent = 100;
+        } else if (book->totalPageCount == 1 && book->currentPage >= 1) {
+            percent = 100;
+        }
+
+        std::string statusLine = "Status : " + statusStr;
+        renderer->drawString(32, 452, statusLine, 1, true, false, true);
+
+        std::string pageLine;
+        if (book->totalPageCount > 0) {
+            pageLine = "Page " + std::to_string(book->currentPage + 1) + " of " + std::to_string(book->totalPageCount) + " (" + std::to_string(percent) + "% completed)";
+        } else {
+            pageLine = "Page count unknown";
+        }
+        renderer->drawString(32, 430, pageLine, 1, false, false, true);
+
+        // Custom Outlined Progress Bar
+        int pb_x = 32;
+        int pb_y = 404;
+        int pb_w = 416;
+        int pb_h = 14;
+        for (int cx = pb_x; cx < pb_x + pb_w; cx++) {
+            renderer->drawPixel(cx, pb_y, false);
+            renderer->drawPixel(cx, pb_y + 1, false);
+            renderer->drawPixel(cx, pb_y + pb_h - 1, false);
+            renderer->drawPixel(cx, pb_y + pb_h - 2, false);
+        }
+        for (int cy = pb_y; cy < pb_y + pb_h; cy++) {
+            renderer->drawPixel(pb_x, cy, false);
+            renderer->drawPixel(pb_x + 1, cy, false);
+            renderer->drawPixel(pb_x + pb_w - 1, cy, false);
+            renderer->drawPixel(pb_x + pb_w - 2, cy, false);
+        }
+        int inner_w = pb_w - 6;
+        int inner_h = pb_h - 6;
+        int fill_w = (inner_w * percent) / 100;
+        for (int cy = pb_y + 3; cy < pb_y + 3 + inner_h; cy++) {
+            for (int cx = pb_x + 3; cx < pb_x + 3 + inner_w; cx++) {
+                if (cx < pb_x + 3 + fill_w) {
+                    renderer->drawPixel(cx, cy, false);
+                } else {
+                    if ((cx % 2 == 0) && (cy % 2 == 0)) {
+                        renderer->drawPixel(cx, cy, false);
+                    } else {
+                        renderer->drawPixel(cx, cy, true);
+                    }
+                }
+            }
+        }
+
+        std::string chapterProgress;
+        if (book->chapterCount > 0) {
+            chapterProgress = "Chapter " + std::to_string(book->currentPageChapterIndex + 1) + " of " + std::to_string(book->chapterCount);
+            if (book->chapterPageCounts.size() > (size_t)book->currentPageChapterIndex && book->chapterPageCounts[book->currentPageChapterIndex] > 0) {
+                chapterProgress += " (" + std::to_string(book->chapterPageCounts[book->currentPageChapterIndex]) + " pages in chapter)";
+            }
+        } else {
+            chapterProgress = "Chapters: None indexed";
+        }
+        renderer->drawString(32, 378, truncateString(chapterProgress, 46), 1, false, false, true);
+
+        // 4. Book Metadata & Specifications Card
+        drawOrnamentalCard(renderer, 16, 88, 448, 260);
+        std::string metaHeader = "✦  SPECIFICATIONS & SETTINGS  ✦";
+        int mhx = 16 + (448 - metaHeader.length() * 8) / 2;
+        renderer->drawString(mhx, 324, metaHeader, 1, true, false, true);
+        for (int cx = 32; cx <= 448; cx++) {
+            renderer->drawPixel(cx, 316, false);
+        }
+
+        std::string bmStr;
+        if (book->bookMarks.empty()) {
+            bmStr = "None";
+        } else {
+            bmStr = std::to_string(book->bookMarks.size()) + " saved (p.";
+            for (size_t i = 0; i < std::min((size_t)4, book->bookMarks.size()); i++) {
+                if (i > 0) bmStr += ", ";
+                bmStr += std::to_string(book->bookMarks[i].pageIndex + 1);
+            }
+            if (book->bookMarks.size() > 4) bmStr += ", ...";
+            bmStr += ")";
+        }
+
+        std::vector<std::string> fileNameLines = wrapUtf8Value(fileName, 39);
+        std::vector<std::string> fullPathLines = wrapUtf8Value(fullPath, 39);
+        size_t extraWrappedLines = (fileNameLines.size() > 1 ? fileNameLines.size() - 1 : 0) +
+                                   (fullPathLines.size() > 1 ? fullPathLines.size() - 1 : 0) +
+                                   (book->isPdf() && !book->parseLog.empty() ? 2 : 0);
+        int rowStep = (extraWrappedLines > 2) ? 18 : 22;
+        int wrapStep = (extraWrappedLines > 2) ? 16 : 18;
+
+        int curY = 292;
+        auto drawRowLines = [&](const std::string &label, const std::vector<std::string> &lines) {
+            if (curY < 96 || lines.empty()) return;
+            renderer->drawString(32, curY, label + lines[0], 1, false, false, true);
+            for (size_t i = 1; i < lines.size(); ++i) {
+                curY -= wrapStep;
+                if (curY < 96) break;
+                renderer->drawString(32 + (int)label.length() * 8, curY, lines[i], 1, false, false, true);
+            }
+            curY -= rowStep;
+        };
+
+        drawRowLines("Chapters   : ", { std::to_string(book->chapterCount) + (book->chapterCount == 1 ? " chapter" : " chapters") });
+        drawRowLines("Bookmarks  : ", { truncateString(bmStr, 39) });
+        drawRowLines("Favorite   : ", { book->favorite ? "Yes (❤ Marked in Favorites)" : "No" });
+        drawRowLines("File Name  : ", fileNameLines);
+        drawRowLines("Full Path  : ", fullPathLines);
+        drawRowLines("Format     : ", { formatStr });
+        drawRowLines("File Size  : ", { sizeStr });
+        if (book->isPdf() && !book->parseLog.empty()) {
+            std::string pdfDiag;
+            for (const std::string &entry : book->parseLog) {
+                if (entry.rfind("pdf_engine=", 0) == 0 ||
+                    entry.rfind("tree_parsed_pages=", 0) == 0 ||
+                    entry.rfind("page0_mode=", 0) == 0 ||
+                    entry.rfind("page[", 0) == 0) {
+                    if (!pdfDiag.empty()) pdfDiag += " | ";
+                    pdfDiag += entry;
+                }
+            }
+            if (!pdfDiag.empty()) {
+                drawRowLines("PDF Engine : ", wrapUtf8Value(pdfDiag, 39));
+            }
+        }
     }
-
-    std::string shortPath = book->path;
-    size_t lastSlash = shortPath.find_last_of("/\\");
-    if (lastSlash != std::string::npos) shortPath = shortPath.substr(lastSlash + 1);
-    shortPath = truncateString(shortPath, 28);
-
-    std::string fontName = book->renderSettings.fontFamily.empty() ? "System Default" : book->renderSettings.fontFamily;
-    std::string fontPt = book->renderSettings.fontPoints > 0 ? (std::to_string(book->renderSettings.fontPoints) + " px") : "Default (14 px)";
-
-    renderer->drawString(32, 292, "Chapters   : " + std::to_string(book->chapterCount) + (book->chapterCount == 1 ? " chapter" : " chapters"), 1, false, false, true);
-    renderer->drawString(32, 270, truncateString("Bookmarks  : " + bmStr, 46), 1, false, false, true);
-    renderer->drawString(32, 248, "Favorite   : " + std::string(book->favorite ? "Yes (❤ Marked in Favorites)" : "No"), 1, false, false, true);
-    renderer->drawString(32, 226, "File Name  : " + shortPath, 1, false, false, true);
-    renderer->drawString(32, 204, "Storage    : " + std::string(Device::getInstance().deviceSettings.storeDataOnSD ? "SD Card (/sdcard)" : "Internal Flash (/littlefs)"), 1, false, false, true);
-    renderer->drawString(32, 182, "Font Style : " + fontName + " • " + fontPt, 1, false, false, true);
-    renderer->drawString(32, 160, "Weight     : " + std::string(book->renderSettings.fontBold ? "Bold text" : "Standard weight"), 1, false, false, true);
-    renderer->drawString(32, 138, "Margins    : Horiz " + std::to_string(book->renderSettings.marginsHorizontal) + "em / Vert " + std::to_string(book->renderSettings.marginsVertical) + "em", 1, false, false, true);
-    renderer->drawString(32, 116, "Line Space : " + std::to_string(book->renderSettings.lineSpacing) + " px additional", 1, false, false, true);
 
     // 5. Bottom Navigation Legend (Inverted Gothic Box)
     renderer->drawGothicBox(16, 32, 448, 42, true);
