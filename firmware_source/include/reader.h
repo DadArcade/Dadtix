@@ -88,7 +88,8 @@ public:
     //unsigned char* activeFrameBuffer;
 
     static constexpr int COMIC_ZOOM_MIN = 100;
-    static constexpr int COMIC_ZOOM_MAX = 250;
+    static constexpr int COMIC_ZOOM_QUARTER = 200;
+    static constexpr int COMIC_ZOOM_MAX = 300;
     static constexpr int COMIC_ZOOM_STEP = 50;
     static constexpr int COMIC_PAN_STEP_X = 120;
     static constexpr int COMIC_PAN_STEP_Y = 160;
