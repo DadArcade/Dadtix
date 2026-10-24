@@ -362,12 +362,26 @@ bool Reader::zoomComicIn()
     }
 
     int oldZoom = comicZoomPercent;
+    int oldMaxPanX = 0, oldMaxPanY = 0;
+    getCurrentSpreadPanLimits(oldZoom, oldMaxPanX, oldMaxPanY);
+
     comicZoomPercent = std::min(COMIC_ZOOM_MAX, comicZoomPercent + COMIC_ZOOM_STEP);
 
     int maxPanX = 0, maxPanY = 0;
     getCurrentSpreadPanLimits(comicZoomPercent, maxPanX, maxPanY);
-    comicPanX = std::max(-maxPanX, std::min(maxPanX, (comicPanX * comicZoomPercent) / std::max(100, oldZoom)));
-    comicPanY = std::max(-maxPanY, std::min(maxPanY, (comicPanY * comicZoomPercent) / std::max(100, oldZoom)));
+    if (oldZoom <= COMIC_ZOOM_MIN) {
+        comicPanX = -maxPanX;
+        comicPanY = -maxPanY;
+    } else {
+        int scaledPanX = (oldMaxPanX > 0)
+            ? (comicPanX * maxPanX) / oldMaxPanX
+            : (comicPanX * comicZoomPercent) / std::max(100, oldZoom);
+        int scaledPanY = (oldMaxPanY > 0)
+            ? (comicPanY * maxPanY) / oldMaxPanY
+            : (comicPanY * comicZoomPercent) / std::max(100, oldZoom);
+        comicPanX = std::max(-maxPanX, std::min(maxPanX, scaledPanX));
+        comicPanY = std::max(-maxPanY, std::min(maxPanY, scaledPanY));
+    }
 
     renderAndDisplayComicZoomSpread();
     return true;
@@ -383,6 +397,9 @@ bool Reader::zoomComicOut()
     }
 
     int oldZoom = comicZoomPercent;
+    int oldMaxPanX = 0, oldMaxPanY = 0;
+    getCurrentSpreadPanLimits(oldZoom, oldMaxPanX, oldMaxPanY);
+
     comicZoomPercent = std::max(COMIC_ZOOM_MIN, comicZoomPercent - COMIC_ZOOM_STEP);
 
     if (comicZoomPercent <= COMIC_ZOOM_MIN) {
@@ -391,8 +408,14 @@ bool Reader::zoomComicOut()
     } else {
         int maxPanX = 0, maxPanY = 0;
         getCurrentSpreadPanLimits(comicZoomPercent, maxPanX, maxPanY);
-        comicPanX = std::max(-maxPanX, std::min(maxPanX, (comicPanX * comicZoomPercent) / std::max(100, oldZoom)));
-        comicPanY = std::max(-maxPanY, std::min(maxPanY, (comicPanY * comicZoomPercent) / std::max(100, oldZoom)));
+        int scaledPanX = (oldMaxPanX > 0)
+            ? (comicPanX * maxPanX) / oldMaxPanX
+            : (comicPanX * comicZoomPercent) / std::max(100, oldZoom);
+        int scaledPanY = (oldMaxPanY > 0)
+            ? (comicPanY * maxPanY) / oldMaxPanY
+            : (comicPanY * comicZoomPercent) / std::max(100, oldZoom);
+        comicPanX = std::max(-maxPanX, std::min(maxPanX, scaledPanX));
+        comicPanY = std::max(-maxPanY, std::min(maxPanY, scaledPanY));
     }
 
     renderAndDisplayComicZoomSpread();
