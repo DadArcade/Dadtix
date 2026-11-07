@@ -32,6 +32,7 @@ MenuHandler::MenuHandler(Renderer *renderer)
     }
     mainMenu = std::make_shared<MenuElement>(renderer, std::string("Diptyx E-reader"),std::string(""));
     authorMenu = std::make_shared<MenuElement>(renderer, std::string("Library"),std::string("Open & read books"));
+    authorMenu->elementsPerPage = 12;
     settingsMenu = std::make_shared<MenuElement>(renderer, std::string("Settings"),std::string("Edit main settings, render settings, etc."));
     deviceSettingsMenu = std::make_shared<MenuElement>(renderer, std::string("Device settings"),std::string("Edit device behaviour"));
     readSettingsMenu = std::make_shared<MenuElement>(renderer, std::string("Book settings"),std::string("Edit the reading experience"));
@@ -290,8 +291,9 @@ void MenuHandler::upButtonAction()
 
         bool isLongPress = (heldMs >= longPressThresholdMs);
 
-        if (isLongPress && menu->children.size() > MaxElementsPerPage) {
-            int target = menu->selectedChildIndex - MaxElementsPerPage;
+        int maxPerPage = menu->getMaxElementsPerPage();
+        if (isLongPress && menu->children.size() > maxPerPage) {
+            int target = menu->selectedChildIndex - maxPerPage;
             if (target < 0) target = 0;
             menu->selectedChildIndex = target;
             Device::buzz();
@@ -334,8 +336,9 @@ void MenuHandler::downButtonAction()
 
         bool isLongPress = (heldMs >= longPressThresholdMs);
 
-        if (isLongPress && menu->children.size() > MaxElementsPerPage) {
-            int target = menu->selectedChildIndex + MaxElementsPerPage;
+        int maxPerPage = menu->getMaxElementsPerPage();
+        if (isLongPress && menu->children.size() > maxPerPage) {
+            int target = menu->selectedChildIndex + maxPerPage;
             if (target >= (int)menu->children.size()) target = (int)menu->children.size() - 1;
             menu->selectedChildIndex = target;
             Device::buzz();
@@ -518,6 +521,7 @@ void MenuHandler::refreshRecentBooksElement()
 
 void MenuHandler::layoutReadMenu(std::vector<Author>& authorList)
 {
+    authorMenu->elementsPerPage = 12;
     authorMenu->children.clear(); //clear all the books
     for(int i=0;i<authorList.size();i++) //fill in the authors and the books
     {

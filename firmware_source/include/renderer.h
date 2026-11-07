@@ -42,6 +42,7 @@ public:
     void drawText(int x, int y, int* text, int text_length, int size, bool bold,bool italics);
     void drawString(int x, int y, std::string utf8String, int size, bool bold,bool italics,bool color = true);
     void drawString(int x, int y, std::vector<int> intArray,int size, std::vector<int> boldMask,std::vector<int> italicsMask,bool color = true, bool uniFont = true);
+    int getStringWidth(const std::string& str, int size = 1, bool bold = false);
     void drawPageOverlay(unsigned char* framebuffer,int currentPage,int totalPages);
     void drawVoltage(unsigned char* framebuffer,float voltage);
     void drawBattery(unsigned char* framebuffer,int level);

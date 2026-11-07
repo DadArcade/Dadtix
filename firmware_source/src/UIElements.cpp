@@ -350,10 +350,10 @@ static const unsigned char* getCachedMenuBackground(Renderer* renderer, bool isM
 }
 
 // Restores the background slice behind a single menu row directly from the cached 1-bit background buffer
-static void restoreMenuRowBackground(unsigned char* dstFb, const unsigned char* cachedBg, int rowY)
+static void restoreMenuRowBackground(unsigned char* dstFb, const unsigned char* cachedBg, int rowY, int rowHeight = 4 * GLYPH_HEIGHT)
 {
     const int stride = EPD_WIDTH / 8;
-    int topFlippedY = (EPD_WIDTH - 1) - (rowY + 4 * GLYPH_HEIGHT);
+    int topFlippedY = (EPD_WIDTH - 1) - (rowY + rowHeight);
     int botFlippedY = (EPD_WIDTH - 1) - (rowY - 5);
     int byteStart = std::max(0, topFlippedY / 8);
     int byteEnd = std::min(stride - 1, botFlippedY / 8);
@@ -374,16 +374,21 @@ void MenuElement::renderElement()
     const bool isMainMenu = (elementName == "Diptyx E-reader");
     const unsigned char* cachedBg = getCachedMenuBackground(renderer, isMainMenu);
 
-    const int maxVisible = MaxElementsPerPage;
+    const int maxVisible = getMaxElementsPerPage();
+    const bool isCompact = (maxVisible > 6);
     int currentPage = selectedChildIndex / maxVisible;
     int startIndex = currentPage * maxVisible;
     int endIndex = std::min(startIndex + maxVisible, (int)children.size());
 
     auto rowYForIndex = [&](int idx) -> int {
         int localIndex = idx - startIndex;
-        int y = EPD_WIDTH - (int)((localIndex + 1.5f) * 5 * GLYPH_HEIGHT);
-        if (startIndex > 0) y -= 2 * GLYPH_HEIGHT;
-        return y;
+        if (isCompact) {
+            return 514 - localIndex * 38;
+        } else {
+            int y = EPD_WIDTH - (int)((localIndex + 1.5f) * 5 * GLYPH_HEIGHT);
+            if (startIndex > 0) y -= 2 * GLYPH_HEIGHT;
+            return y;
+        }
     };
 
     bool activeItemEditing = false;
@@ -399,6 +404,8 @@ void MenuElement::renderElement()
     static int lastSelectedIdx = -1;
     static bool lastEditing = false;
 
+    const int restoreH = isCompact ? (2 * GLYPH_HEIGHT + 1) : (4 * GLYPH_HEIGHT);
+
     // Fast path: when moving selection within the same menu & page without toggling value edit mode,
     // only restore and redraw the previously selected row and newly selected row!
     if (cachedBg != nullptr &&
@@ -411,8 +418,8 @@ void MenuElement::renderElement()
         lastSelectedIdx != selectedChildIndex) {
         int prevY = rowYForIndex(lastSelectedIdx);
         int currY = rowYForIndex(selectedChildIndex);
-        restoreMenuRowBackground(renderer->framebuffer, cachedBg, prevY);
-        restoreMenuRowBackground(renderer->framebuffer, cachedBg, currY);
+        restoreMenuRowBackground(renderer->framebuffer, cachedBg, prevY, restoreH);
+        restoreMenuRowBackground(renderer->framebuffer, cachedBg, currY, restoreH);
         children[lastSelectedIdx]->renderIcon(prevY, false);
         children[selectedChildIndex]->renderIcon(currY, true);
         lastSelectedIdx = selectedChildIndex;
@@ -450,9 +457,10 @@ void MenuElement::renderElement()
 
     // Show up arrow if there are items above
     if (startIndex > 0) {
+        int upArrowY = isCompact ? 555 : (EPD_WIDTH - GLYPH_HEIGHT * 5);
         renderer->drawCharacter(
             EPD_HEIGHT / 2 - GLYPH_WIDTH, // x pos
-            EPD_WIDTH - GLYPH_HEIGHT * 5, // near top
+            upArrowY,
             8593, // ↑
             true, false, 2, true
         );
@@ -460,10 +468,10 @@ void MenuElement::renderElement()
 
     // Show down arrow if there are items below
     if (endIndex < (int)children.size()) {
-        int yOffset = (startIndex > 0) ? (2 * GLYPH_HEIGHT) : 0;
+        int downArrowY = isCompact ? 64 : (lowestY - 3 * GLYPH_HEIGHT - ((startIndex > 0) ? (2 * GLYPH_HEIGHT) : 0));
         renderer->drawCharacter(
             EPD_HEIGHT / 2 - GLYPH_WIDTH,       // x pos
-            lowestY - 3 * GLYPH_HEIGHT - yOffset, // near bottom
+            downArrowY,
             8595, // ↓
             true, false, 2, true
         );
@@ -493,6 +501,48 @@ void MenuElement::renderIcon(int y, bool highlight)
     if (highlight) {
         renderer->drawCharacter(EPD_HEIGHT - 60, y + 0.5 * GLYPH_HEIGHT,8594,true, false, 3, false);
     }
+}
+
+void AuthorElement::renderIcon(int y, bool highlight)
+{
+    int originX = 14;
+    int rectHeight = 2 * GLYPH_HEIGHT;
+    int rectWidth = EPD_HEIGHT - 2 * originX;
+    int padding = 4;
+    int d = rectHeight / 2;
+    int textStartX = originX + d + 8;
+    int textEndX = originX + rectWidth - d - 8;
+
+    renderer->drawGothicBox(originX, y, rectWidth, rectHeight, highlight);
+
+    int count = author ? (int)author->bookList.size() : 0;
+    std::string countStr = std::to_string(count) + (count == 1 ? " book" : " books");
+
+    int countWidth = renderer->getStringWidth(countStr, 1, false);
+    int countX = textEndX - countWidth;
+
+    // Draw book count on the right
+    renderer->drawString(countX, y + 0.5 * GLYPH_HEIGHT + padding, countStr, 1, false, false, !highlight);
+
+    // Format author name on the left
+    std::string displayName = elementName;
+    if (author) {
+        if (author->name == "Favorite books") {
+            displayName = "Favorite books ❤";
+        } else if (author->name == "Recently Read") {
+            displayName = "Recently Read ✦";
+        }
+    }
+
+    int maxNameWidth = countX - textStartX - 16;
+    if (renderer->getStringWidth(displayName, 1, true) > maxNameWidth) {
+        while (!displayName.empty() && renderer->getStringWidth(displayName + "...", 1, true) > maxNameWidth) {
+            displayName.pop_back();
+        }
+        displayName += "...";
+    }
+
+    renderer->drawString(textStartX, y + 0.5 * GLYPH_HEIGHT + padding, displayName, 1, true, false, !highlight);
 }
 
 void BookElement::renderIcon(int y, bool highlight)

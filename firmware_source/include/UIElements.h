@@ -67,6 +67,9 @@ class MenuElement : public UIElement {
     void enterElement();
     UIElementType getType() const override { return UIElementType::Menu; }
 
+    int elementsPerPage = MaxElementsPerPage;
+    virtual int getMaxElementsPerPage() const { return elementsPerPage; }
+
     std::vector<std::shared_ptr<UIElement>> children;
     int selectedChildIndex = 0;
     private:
@@ -138,6 +141,7 @@ public:
         }
     }
 
+    void renderIcon(int y, bool Highlight) override;
     UIElementType getType() const override { return UIElementType::Author; }
     Author* author;
 };

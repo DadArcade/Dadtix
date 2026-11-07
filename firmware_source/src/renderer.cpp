@@ -565,6 +565,21 @@ void Renderer::drawString(int x, int y, std::vector<int> intArray, int size, std
     }
 }
 
+int Renderer::getStringWidth(const std::string& str, int size, bool bold)
+{
+    int stringSize = (int)str.length();
+    if (stringSize == 0) return 0;
+    int* intArray = new int[stringSize];
+    int utf8StringSize = utf8ToCodePoints(str.c_str(), intArray, stringSize);
+    int totalWidth = 0;
+    for (int i = 0; i < utf8StringSize; i++) {
+        totalWidth += (fontHandler.getFontCharWidth(intArray[i]) + bold) * size;
+    }
+    delete[] intArray;
+    return totalWidth;
+}
+
+
 
 void Renderer::drawSquare(int startx, int starty, int lengthx, int lengthy, bool value)
 {
