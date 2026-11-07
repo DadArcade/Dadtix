@@ -42,12 +42,19 @@ SDCard::SDCard(const char *mount_point,
     slot_config.gpio_cd = GPIO_NUM_NC;
     slot_config.gpio_wp = GPIO_NUM_NC;
 
-    // Mount filesystem
-    ret = esp_vfs_fat_sdmmc_mount(m_mount_point.c_str(),
-                                  &host,
-                                  &slot_config,
-                                  &mount_config,
-                                  &m_card);
+    // Mount filesystem with retries (SD card may be recovering from a warm reset)
+    for (int attempt = 0; attempt < 3; attempt++) {
+        ret = esp_vfs_fat_sdmmc_mount(m_mount_point.c_str(),
+                                      &host,
+                                      &slot_config,
+                                      &mount_config,
+                                      &m_card);
+        if (ret == ESP_OK) {
+            break;
+        }
+        ESP_LOGW(TAG, "Mount attempt %d failed (%s), retrying...", attempt + 1, esp_err_to_name(ret));
+        vTaskDelay(pdMS_TO_TICKS(150));
+    }
 
     if (ret != ESP_OK) {
         if (ret == ESP_FAIL) {

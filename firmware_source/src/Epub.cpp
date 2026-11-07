@@ -302,11 +302,13 @@ bool Epub::parse_toc_ncx_file(ZipFile &zip)
   while (navPoint)
   {
     // navPoint has also an id & playOrder element: navPoint->Attribute("id");
-    auto navLabel = navPoint->FirstChildElement("navLabel")->FirstChildElement("text")->FirstChild();
     std::string title = "";
-    if(navLabel && navLabel->Value()) 
-    {
-      title = navLabel->Value();
+    auto navLabelElem = navPoint->FirstChildElement("navLabel");
+    if (navLabelElem) {
+        auto textElem = navLabelElem->FirstChildElement("text");
+        if (textElem && textElem->FirstChild() && textElem->FirstChild()->Value()) {
+            title = textElem->FirstChild()->Value();
+        }
     }
     auto content = navPoint->FirstChildElement("content");
     std::string src = decodePercent20(content ? content->Attribute("src") : nullptr); //In case a publisher gets the idea in their thick skull to use spaces in filenames

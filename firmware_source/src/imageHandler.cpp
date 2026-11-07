@@ -211,7 +211,8 @@ void Image::prepare()
     // ============================
     if (format == ImageFormat::JPEG) {
         constexpr size_t WORK_BUF_SIZE = 4096;
-        uint8_t work_buf[WORK_BUF_SIZE];
+        std::vector<uint8_t> workBufStorage(WORK_BUF_SIZE);
+        uint8_t *work_buf = workBufStorage.data();
         JDEC jd;
 
         if (!loadData(256)) {

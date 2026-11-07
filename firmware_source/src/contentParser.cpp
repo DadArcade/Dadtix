@@ -58,7 +58,17 @@ void ContentParser::finishPage(bool draw)
 void ContentParser::parseImage(Image& image, Style& style,bool draw)
 {
     fontHeight = Device::getInstance().renderer->fontHandler.currentFont.lineHeight + Device::getInstance().renderSettings.lineSpacing;
-    if(!image.cached) image.prepare();
+    if (fontHeight <= 0) fontHeight = 16;
+    if (style.widthSet && style.heightSet)
+    {
+        image.imageWidth = std::min(style.width, EPD_HEIGHT);
+        image.imageHeight = std::min(style.height, EPD_WIDTH);
+        image.cached = true;
+    }
+    else if (!image.cached)
+    {
+        image.prepare();
+    }
     ESP_LOGI(TAG, "Image height: %d",image.imageHeight);
     ESP_LOGI(TAG, "Image width: %d",image.imageWidth);
     if(style.widthSet && style.heightSet) 
@@ -150,7 +160,10 @@ void ContentParser::parseOverflowedImage(Style style,bool draw)
 void ContentParser::parseTextBlock(const std::vector<int>& textBlock, bool newLine, Style style, bool draw)
 {
     fontHeight = Device::getInstance().renderer->fontHandler.currentFont.lineHeight + Device::getInstance().renderSettings.lineSpacing;
+    if (fontHeight <= 0) fontHeight = 16;
     maxLines = (EPD_WIDTH/fontHeight)-Device::getInstance().renderSettings.marginsVertical-1;
+    if (maxLines <= 0) maxLines = 1;
+    if (style.fontSize <= 0) style.fontSize = 1;
     bool spaceFound = false; 
     bool bold = style.bold; 
     bool italics = style.italic; 
@@ -187,8 +200,10 @@ void ContentParser::parseTextBlock(const std::vector<int>& textBlock, bool newLi
 
     while(true)
     {
+        if (style.fontSize <= 0) style.fontSize = 1;
         this->currentLine += style.fontSize-this->fontSize;
         this->fontSize = style.fontSize; 
+        if (this->fontSize <= 0) this->fontSize = 1; 
         if(!spaceFound)
         {
             nextSpaceDistance=0;

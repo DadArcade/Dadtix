@@ -1436,12 +1436,22 @@ void BookHandler::reindexBook(Book *book) {
         return;
     }
 
-    Reader reader;
-    reader.init(book, nullptr);
-    reader.indexPages();
-    book->renderSettings = book->getCurrentRenderSettings();
-
+    rtc_setCurrentlyParsing(book->path);
+    Reader *reader = Device::getInstance().reader;
+    if (reader) {
+        reader->init(book, Device::getInstance().renderer);
+        reader->indexPages();
+    }
+    if (book->totalPageCount > 0) {
+        book->renderSettings = book->getCurrentRenderSettings();
+        book->badParse = false;
+        book->parseError.clear();
+    } else {
+        book->badParse = true;
+        book->parseError = "Reindexing resulted in 0 pages";
+    }
     saveBook(book); // only update this book's file
-    ESP_LOGI(TAG, "Re-indexed and saved book: %s", book->title.c_str());
+    rtc_clearCurrentlyParsing();
+    ESP_LOGI(TAG, "Re-indexed and saved book: %s (pages: %d)", book->title.c_str(), book->totalPageCount);
 }
 

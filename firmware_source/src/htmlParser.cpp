@@ -2,6 +2,8 @@
 #include <esp_log.h>
 #include <algorithm>
 #include <cctype>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 //This code is a heavily modified version of Atomic 14's Epub reader
 static const char *TAG = "HTML Parser";
@@ -147,7 +149,7 @@ bool HtmlParser::VisitEnter(const tinyxml2::XMLElement &element, const tinyxml2:
         {
             contentParser->finishPage();
             this->currentPage++;
-            if(this->currentPage==this->targetPage+1) renderer->framebuffer=rightScreenBuffer;
+            if(this->currentPage==this->targetPage+1 && renderer) renderer->framebuffer=rightScreenBuffer;
             if(this->currentPage>this->targetPage+1 && !this->indexingMode) doneParsing = true;
             bool drawPage = (this->currentPage==this->targetPage || this->currentPage==this->targetPage+1);
             if(drawPage) imagePresentOnPage=true;
@@ -210,7 +212,12 @@ bool HtmlParser::VisitEnter(const tinyxml2::XMLElement &element, const tinyxml2:
         this->styleHierarchy.back().widthSet = true;
         this->styleHierarchy.back().heightSet = true;
 
+        image.imageWidth = EPD_HEIGHT;
+        image.imageHeight = EPD_WIDTH;
+        image.cached = true;
+
         contentParser->parseImage(image,styleHierarchy.back(),drawPage);
+        cachedImages.push_back({imagePath, image.imageWidth, image.imageHeight});
         this->styleHierarchy.pop_back();
       }
 
@@ -388,6 +395,11 @@ bool HtmlParser::Visit(const tinyxml2::XMLText &text)
   }
   if(this->currentPage<this->targetPage || this->indexingMode) currentElementIndex++;
 
+  if(this->indexingMode && (currentElementIndex % 50 == 0))
+  {
+    vTaskDelay(1);
+  }
+
   if (encoding == UTF8) {
     parsedCodePoints = decodeHtmlEntities(utf8ToCodePoints(textValue));
   } else if (encoding == ISO8859_1) {
@@ -401,7 +413,7 @@ bool HtmlParser::Visit(const tinyxml2::XMLText &text)
   if(contentParser->textOverflowBuffer.size()) 
   {
     this->currentPage++;
-    if(this->currentPage==this->targetPage+1) renderer->framebuffer=rightScreenBuffer;
+    if(this->currentPage==this->targetPage+1 && renderer) renderer->framebuffer=rightScreenBuffer;
     if(this->currentPage>this->targetPage+1 && !this->indexingMode) doneParsing = true;
     this->emptyTextOverflow();
   }
@@ -422,7 +434,7 @@ void HtmlParser::emptyTextOverflow()
     if(contentParser->textOverflowBuffer.size())
     {
       this->currentPage++;
-      if(this->currentPage==this->targetPage+1) renderer->framebuffer=rightScreenBuffer;
+      if(this->currentPage==this->targetPage+1 && renderer) renderer->framebuffer=rightScreenBuffer;
       if(this->currentPage>this->targetPage+1 && !this->indexingMode) doneParsing = true;
     }
     else

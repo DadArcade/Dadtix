@@ -176,35 +176,39 @@ void Reader::init(Book *book,Renderer* renderer)
 
 int Reader::getCurrentPageAbsolute(int chapter, int page)
 {
+    if (!book) return page;
     int pageCounter = 0;
-    for(int i = 0;i<chapter;i++)
+    int maxChapter = std::min(chapter, static_cast<int>(book->chapterPageCounts.size()));
+    for(int i = 0; i < maxChapter; i++)
     {
-        pageCounter+= book->chapterPageCounts[i];
+        pageCounter += book->chapterPageCounts[i];
     }
-    pageCounter+=page;
+    pageCounter += page;
     return pageCounter;
 }
 
 int Reader::getCurrentChapter(int page)
 {
-    if (!this->epub) return 0;
+    if (!this->epub || !book || book->chapterPageCounts.empty()) return 0;
     int pageCounter = page;
-    for(int i = 0;i<this->epub->get_spine_items_count();i++)
+    int maxItems = std::min(this->epub->get_spine_items_count(), static_cast<int>(book->chapterPageCounts.size()));
+    for(int i = 0; i < maxItems; i++)
     {
-        pageCounter-= book->chapterPageCounts[i];
-        if(pageCounter<0) return i;
+        pageCounter -= book->chapterPageCounts[i];
+        if(pageCounter < 0) return i;
     }
     return 0;
 }
 
 int Reader::getCurrentPageInChapter(int page)
 {
-    if (!this->epub) return 0;
+    if (!this->epub || !book || book->chapterPageCounts.empty()) return 0;
     int pageCounter = page;
-    for(int i = 0;i<this->epub->get_spine_items_count();i++)
+    int maxItems = std::min(this->epub->get_spine_items_count(), static_cast<int>(book->chapterPageCounts.size()));
+    for(int i = 0; i < maxItems; i++)
     {
-        if(pageCounter<book->chapterPageCounts[i]) return pageCounter;
-        pageCounter-= book->chapterPageCounts[i];
+        if(pageCounter < book->chapterPageCounts[i]) return pageCounter;
+        pageCounter -= book->chapterPageCounts[i];
     }
     return 0;
 }
@@ -592,13 +596,13 @@ void Reader::openPage()
         leftPageFrameBuffer,
         rightPageFrameBuffer,
         [this]() {
-            if (!hasOpenComic() || book->currentPage + 2 < book->totalPageCount) {
+            if (book && book->currentPage + 2 < book->totalPageCount) {
                 book->currentPage += 2;
                 renderPages(leftPageFrameBufferNext, rightPageFrameBufferNext,2);
                 book->currentPage -= 2;
             }
 
-            if (book->currentPage >= 2) {
+            if (book && book->currentPage >= 2) {
                 book->currentPage -= 2;
                 renderPages(leftPageFrameBufferPrevious, rightPageFrameBufferPrevious,0);
                 book->currentPage += 2;
@@ -803,15 +807,21 @@ void Reader::indexPages(void)
     book->chapterPageCounts.clear();
     book->cachedImages.clear();
     book->totalPageCount = 0;
-    book->chapterCount = this->epub->get_spine_items_count();
-    for(int i=0;i<epub->get_spine_items_count();i++)
+    if (!this->epub) {
+        book->chapterCount = 0;
+        return;
+    }
+    int spineCount = this->epub->get_spine_items_count();
+    book->chapterCount = spineCount;
+    for(int i=0;i<spineCount;i++)
     {
+        vTaskDelay(pdMS_TO_TICKS(20));
         std::string currentChapterPath = epub->get_spine_item(i);
         char *html = reinterpret_cast<char *>(this->epub->get_item_contents(currentChapterPath));
         if(html)
         {
             HtmlParser *parser = nullptr;
-            ESP_LOGI(TAG, "render Chapter: %s", currentChapterPath.c_str());
+            ESP_LOGI(TAG, "render Chapter %d/%d: %s", i + 1, spineCount, currentChapterPath.c_str());
             parser = new HtmlParser(html, strlen(html), currentChapterPath,this->renderer,-2,this->epub,leftPageFrameBuffer,rightPageFrameBuffer);
             parser->indexingMode = true;
             parser->currentChapterIndex = i;
@@ -833,7 +843,7 @@ void Reader::indexPages(void)
             int pageCount = (parser->pageReturn+1);
             if(pageCount%2) pageCount+=1;
             book->chapterPageCounts.push_back(pageCount);
-           book->totalPageCount += pageCount;
+            book->totalPageCount += pageCount;
             free(html);
             delete parser;
         } 

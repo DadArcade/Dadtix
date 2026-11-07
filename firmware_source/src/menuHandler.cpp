@@ -816,6 +816,13 @@ void MenuHandler::openBook(Book *book)
         Device::getInstance().bookHandler->reindexBook(book);
     }
 
+    if (book->badParse || book->totalPageCount <= 0) {
+        Device::getInstance().notificationHandler->drawErrorNotification(book->title);
+        vTaskDelay(pdMS_TO_TICKS(500));
+        drawMenu();
+        return;
+    }
+
     Device::getInstance().notificationHandler->drawBookOpeningNotification(book->title);
     Reader *reader = Device::getInstance().reader;
     reader->init(book, renderer);

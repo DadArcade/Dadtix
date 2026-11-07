@@ -381,17 +381,20 @@ std::vector<int> utf8ToCodePoints(const std::string& utf8) {
             bytes = 1;
         } else if ((c & 0xE0) == 0xC0) {
             // 2-byte UTF-8
+            if (i + 1 >= utf8.size()) { i++; continue; }
             codepoint = (c & 0x1F) << 6;
             codepoint |= (static_cast<uint8_t>(utf8[i+1]) & 0x3F);
             bytes = 2;
         } else if ((c & 0xF0) == 0xE0) {
             // 3-byte UTF-8
+            if (i + 2 >= utf8.size()) { i++; continue; }
             codepoint = (c & 0x0F) << 12;
             codepoint |= (static_cast<uint8_t>(utf8[i+1]) & 0x3F) << 6;
             codepoint |= (static_cast<uint8_t>(utf8[i+2]) & 0x3F);
             bytes = 3;
         } else if ((c & 0xF8) == 0xF0) {
             // 4-byte UTF-8
+            if (i + 3 >= utf8.size()) { i++; continue; }
             codepoint = (c & 0x07) << 18;
             codepoint |= (static_cast<uint8_t>(utf8[i+1]) & 0x3F) << 12;
             codepoint |= (static_cast<uint8_t>(utf8[i+2]) & 0x3F) << 6;

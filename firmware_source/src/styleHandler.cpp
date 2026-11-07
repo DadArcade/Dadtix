@@ -15,7 +15,7 @@ Style::Style(const Style* parent) {
     }
     else
     {
-        fontSize = Device::getInstance().renderSettings.fontSize;
+        fontSize = std::max(1, Device::getInstance().renderSettings.fontSize);
         bold = Device::getInstance().renderSettings.fontBold;
     }
 }
@@ -28,8 +28,9 @@ void Style::applyClass(const CSSCache& cssCache, const std::string& className) {
 
     const StyleMap& styles = classIt->second;
 
-    if(styles.find("font-size") != styles.end())
-        fontSize = translateFontSize(styles.at("font-size"));
+    if(styles.find("font-size") != styles.end()) {
+        fontSize = std::max(1, translateFontSize(styles.at("font-size")));
+    }
 
     if(styles.find("font-weight") != styles.end())
         bold = translateFontWeight(styles.at("font-weight"));
@@ -53,9 +54,11 @@ void Style::applyClass(const CSSCache& cssCache, const std::string& className) {
 // ----------------------------
 // Translation helpers
 int Style::translateFontSize(const std::string& fontSizeValue) {
+    int defaultSize = std::max(1, Device::getInstance().renderSettings.fontSize);
+
     // 1. Handle text keywords
-    if(fontSizeValue == "small") return Device::getInstance().renderSettings.fontSize;
-    if(fontSizeValue == "medium") return Device::getInstance().renderSettings.fontSize;
+    if(fontSizeValue == "small") return defaultSize;
+    if(fontSizeValue == "medium") return defaultSize;
     if(fontSizeValue == "large") return 2;
 
     // 2. Handle -em units
@@ -65,10 +68,11 @@ int Style::translateFontSize(const std::string& fontSizeValue) {
         char* endPtr = nullptr;
         double val = std::strtod(numberPart.c_str(), &endPtr);
         if(endPtr != numberPart.c_str()) {
-            if(static_cast<int>(std::round(val))==0 || static_cast<int>(std::round(val))==1) return Device::getInstance().renderSettings.fontSize;
-            else return static_cast<int>(std::round(val));
+            int rounded = static_cast<int>(std::round(val));
+            if(rounded <= 1) return defaultSize;
+            else return std::clamp(rounded, 1, 3);
         }
-        return Device::getInstance().renderSettings.fontSize; // fallback
+        return defaultSize; // fallback
     }
 
     // 3. Handle percentages
@@ -80,12 +84,12 @@ int Style::translateFontSize(const std::string& fontSizeValue) {
         double val = std::strtod(numberPart.c_str(), &endPtr);
 
         if (endPtr != numberPart.c_str()) {
-            return std::min(3, static_cast<int>(std::round(fontSize * val / 100.0)));
+            return std::clamp(static_cast<int>(std::round(fontSize * val / 100.0)), 1, 3);
         }
 
-        return fontSize; // fallback
+        return std::max(1, fontSize); // fallback
     }
-    return Device::getInstance().renderSettings.fontSize;
+    return defaultSize;
 }
 
 // ----------------------------
